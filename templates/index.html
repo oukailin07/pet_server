@@ -1,129 +1,85 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>ESP32 实时温湿度监控</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ESP32 实时粮桶余粮监控</title>
   <style>
     body { font-family: Arial, sans-serif; text-align: center; }
-    canvas { width: 100% !important; max-width: 600px; height: 300px !important; margin-top: 20px; }
+    h1 { margin-top: 20px; }
+    
+    /* 样式设置 */
+    #grain_bar {
+      width: 100px;  /* 固定宽度 */
+      height: 300px; /* 固定高度 */
+      background-color: #ddd;
+      margin: 20px auto;
+      border-radius: 10px;
+      position: relative;
+    }
+
+    #grain_level_bar {
+      width: 100%;
+      background-color: #4CAF50;
+      border-radius: 10px;
+      position: absolute;
+      bottom: 0;
+      text-align: center;
+      line-height: 30px;
+      color: white;
+      font-weight: bold;
+      font-size: 18px;
+    }
+
+    #grain_level_text {
+      font-size: 18px;
+      font-weight: bold;
+      margin-top: 10px;
+    }
+
+    #device_id {
+      font-size: 16px;
+      font-weight: normal;
+      margin-top: 5px;
+    }
   </style>
 </head>
 <body>
-  <h1>ESP32 实时温湿度图表</h1>
-
-  <!-- 添加这两行canvas标签 -->
-  <canvas id="tempChart"></canvas>
-  <canvas id="humChart"></canvas>
+  <h1>粮桶余粮监控</h1>
+  
+  <!-- 显示设备 ID 和粮桶余粮的文本和竖直柱形图 -->
+  <p>设备 ID: <span id="device_id">Loading...</span></p>
+  <p>当前粮桶余粮：<span id="grain_level_text">Loading...</span></p>
+  
+  <div id="grain_bar">
+    <div id="grain_level_bar">0g</div>
+  </div>
 
   <script>
-    alert("JS 加载成功！");
-
-    const tempCtx = document.getElementById('tempChart').getContext('2d');
-    const humCtx = document.getElementById('humChart').getContext('2d');
-
-    const tempChart = new Chart(tempCtx, {
-      type: 'line',
-      data: {
-        labels: [],
-        datasets: [{
-          label: '温度 (℃)',
-          data: [],
-          borderColor: 'red',
-          fill: false
-        }]
-      },
-      options: {
-        responsive: true,
-        scales: {
-          x: {
-            ticks: {
-              font: {
-                size: 16
-              }
-            }
-          },
-          y: {
-            ticks: {
-              font: {
-                size: 16
-              }
-            }
-          }
-        },
-        plugins: {
-          legend: {
-            labels: {
-              font: {
-                size: 18
-              }
-            }
-          }
-        }
-      }
-    });
-
-    const humChart = new Chart(humCtx, {
-      type: 'line',
-      data: {
-        labels: [],
-        datasets: [{
-          label: '湿度 (%)',
-          data: [],
-          borderColor: 'blue',
-          fill: false
-        }]
-      },
-      options: {
-        responsive: true,
-        scales: {
-          x: {
-            ticks: {
-              font: {
-                size: 16
-              }
-            }
-          },
-          y: {
-            ticks: {
-              font: {
-                size: 16
-              }
-            }
-          }
-        },
-        plugins: {
-          legend: {
-            labels: {
-              font: {
-                size: 18
-              }
-            }
-          }
-        }
-      }
-    });
-
-    async function updateCharts() {
-      const res = await fetch('/data');
+    async function getGrainLevel() {
+      const res = await fetch('/get_grain_level');
       const data = await res.json();
+      
+      // 获取设备ID和粮桶余粮
+      const deviceId = data.device_id || 'Unknown Device';
+      const grainLevel = data.grain_level || 0;
+      const totalCapacity = 2000;  // 总容量2000g
 
-      const timestamps = data.map(d => d.timestamp.slice(11, 19));
-      const temps = data.map(d => d.temp);
-      const hums = data.map(d => d.hum);
+      // 更新设备ID文本显示
+      document.getElementById('device_id').innerText = deviceId;
 
-      tempChart.data.labels = timestamps;
-      tempChart.data.datasets[0].data = temps;
-      tempChart.update();
+      // 更新粮桶余粮文本显示
+      document.getElementById('grain_level_text').innerText = `${grainLevel} g`;
 
-      humChart.data.labels = timestamps;
-      humChart.data.datasets[0].data = hums;
-      humChart.update();
+      // 更新竖直柱形图
+      const percentage = (grainLevel / totalCapacity) * 100;  // 计算百分比
+      const grainBar = document.getElementById('grain_level_bar');
+      grainBar.style.height = `${percentage}%`;  // 根据余粮百分比调整高度
+      grainBar.innerText = `${grainLevel} g`;
     }
 
-    updateCharts();
-    setInterval(updateCharts, 5000);
+    getGrainLevel();  // 页面加载时获取一次粮桶余粮
+    setInterval(getGrainLevel, 5000);  // 每5秒刷新一次粮桶余粮
   </script>
 </body>
 </html>
-
