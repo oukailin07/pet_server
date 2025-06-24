@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>ESP32 实时温湿度监控</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; text-align: center; }
+    canvas { width: 100% !important; max-width: 600px; height: 300px !important; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <h1>ESP32 实时温湿度图表</h1>
+
+  <!-- 添加这两行canvas标签 -->
+  <canvas id="tempChart"></canvas>
+  <canvas id="humChart"></canvas>
+
+  <script>
+    alert("JS 加载成功！");
+
+    const tempCtx = document.getElementById('tempChart').getContext('2d');
+    const humCtx = document.getElementById('humChart').getContext('2d');
+
+    const tempChart = new Chart(tempCtx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [{
+          label: '温度 (℃)',
+          data: [],
+          borderColor: 'red',
+          fill: false
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          x: {
+            ticks: {
+              font: {
+                size: 16
+              }
+            }
+          },
+          y: {
+            ticks: {
+              font: {
+                size: 16
+              }
+            }
+          }
+        },
+        plugins: {
+          legend: {
+            labels: {
+              font: {
+                size: 18
+              }
+            }
+          }
+        }
+      }
+    });
+
+    const humChart = new Chart(humCtx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [{
+          label: '湿度 (%)',
+          data: [],
+          borderColor: 'blue',
+          fill: false
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          x: {
+            ticks: {
+              font: {
+                size: 16
+              }
+            }
+          },
+          y: {
+            ticks: {
+              font: {
+                size: 16
+              }
+            }
+          }
+        },
+        plugins: {
+          legend: {
+            labels: {
+              font: {
+                size: 18
+              }
+            }
+          }
+        }
+      }
+    });
+
+    async function updateCharts() {
+      const res = await fetch('/data');
+      const data = await res.json();
+
+      const timestamps = data.map(d => d.timestamp.slice(11, 19));
+      const temps = data.map(d => d.temp);
+      const hums = data.map(d => d.hum);
+
+      tempChart.data.labels = timestamps;
+      tempChart.data.datasets[0].data = temps;
+      tempChart.update();
+
+      humChart.data.labels = timestamps;
+      humChart.data.datasets[0].data = hums;
+      humChart.update();
+    }
+
+    updateCharts();
+    setInterval(updateCharts, 5000);
+  </script>
+</body>
+</html>
+
