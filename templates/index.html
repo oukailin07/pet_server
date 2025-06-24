@@ -42,17 +42,30 @@
       font-weight: normal;
       margin-top: 5px;
     }
+
+    /* 喂食计划样式 */
+    #feeding_plans {
+      margin-top: 20px;
+      text-align: left;
+      display: inline-block;
+    }
   </style>
 </head>
 <body>
   <h1>粮桶余粮监控</h1>
   
   <!-- 显示设备 ID 和粮桶余粮的文本和竖直柱形图 -->
-  <p>设备 ID: <span id="device_id">Loading...</span></p>
   <p>当前粮桶余粮：<span id="grain_level_text">Loading...</span></p>
   
   <div id="grain_bar">
     <div id="grain_level_bar">0g</div>
+  </div>
+
+  <div id="feeding_plans">
+    <h2>喂食计划</h2>
+    <ul id="feeding_plan_list">
+      <!-- 喂食计划列表将在此显示 -->
+    </ul>
   </div>
 
   <script>
@@ -60,13 +73,9 @@
       const res = await fetch('/get_grain_level');
       const data = await res.json();
       
-      // 获取设备ID和粮桶余粮
-      const deviceId = data.device_id || 'Unknown Device';
+      // 获取当前粮桶余粮
       const grainLevel = data.grain_level || 0;
       const totalCapacity = 2000;  // 总容量2000g
-
-      // 更新设备ID文本显示
-      document.getElementById('device_id').innerText = deviceId;
 
       // 更新粮桶余粮文本显示
       document.getElementById('grain_level_text').innerText = `${grainLevel} g`;
@@ -78,8 +87,25 @@
       grainBar.innerText = `${grainLevel} g`;
     }
 
+    async function getFeedingPlans() {
+      const res = await fetch('/get_feeding_plans');
+      const data = await res.json();
+
+      const feedingPlanList = document.getElementById('feeding_plan_list');
+      feedingPlanList.innerHTML = '';  // 清空现有的喂食计划
+
+      data.feeding_plans.forEach(plan => {
+        const listItem = document.createElement('li');
+        listItem.innerText = `设备ID: ${plan.device_id}, 星期: ${plan.day_of_week}, 时间: ${plan.hour}:${plan.minute}, 喂食量: ${plan.feeding_amount}g`;
+        feedingPlanList.appendChild(listItem);
+      });
+    }
+
     getGrainLevel();  // 页面加载时获取一次粮桶余粮
     setInterval(getGrainLevel, 5000);  // 每5秒刷新一次粮桶余粮
+
+    getFeedingPlans();  // 页面加载时获取一次喂食计划
+    setInterval(getFeedingPlans, 5000);  // 每5秒刷新一次喂食计划
   </script>
 </body>
 </html>
