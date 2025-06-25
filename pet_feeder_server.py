@@ -115,25 +115,25 @@ def generate_device_id():
 def device_heartbeat():
     """处理设备心跳包"""
     try:
-        data = request.get_json()
+        # 先打印原始请求体和Content-Type，便于排查ESP32端请求体问题
+        print("原始请求体：", request.get_data(as_text=True))
+        print("Content-Type：", request.content_type)
+        data = request.get_json(silent=True)
         if not data:
+            print("收到空请求体或无效JSON，直接返回400")
             return jsonify({"error": "Invalid JSON data"}), 400
-        
         device_id = data.get('device_id', '')
         device_type = data.get('device_type', 'pet_feeder')
         firmware_version = data.get('firmware_version', '1.0.0')
-        
         print(f"[{datetime.now()}] 收到心跳包:")
         print(f"  设备ID: {device_id if device_id else 'NULL'}")
         print(f"  设备类型: {device_type}")
         print(f"  固件版本: {firmware_version}")
-        
         # 检查设备是否已注册
         if not device_id or device_id not in [d.device_id for d in Device.query.all()]:
             # 新设备，分配设备ID和密码
             new_device_id = generate_device_id()
             new_password = "123456"  # 默认密码
-            
             # 创建新设备记录
             new_device = Device(
                 device_id=new_device_id,
@@ -145,19 +145,18 @@ def device_heartbeat():
                 is_online=True,
                 heartbeat_count=1
             )
-            
             db.session.add(new_device)
             db.session.commit()
-            
             print(f"  分配新设备ID: {new_device_id}")
             print(f"  分配密码: {new_password}")
-            
             response = {
                 "need_device_id": True,
                 "device_id": new_device_id,
                 "password": new_password,
                 "message": "Device registered successfully"
             }
+            print("心跳包响应内容：", response)
+            return jsonify(response), 200
         else:
             # 已注册设备，更新最后心跳时间
             device = Device.query.filter_by(device_id=device_id).first()
@@ -166,20 +165,17 @@ def device_heartbeat():
                 device.heartbeat_count += 1
                 device.is_online = True
                 db.session.commit()
-                
                 print(f"  设备已注册，心跳计数: {device.heartbeat_count}")
-                
                 response = {
                     "need_device_id": False,
                     "status": "success",
                     "message": "Heartbeat received",
                     "heartbeat_count": device.heartbeat_count
                 }
+                print("心跳包响应内容：", response)
+                return jsonify(response), 200
             else:
                 return jsonify({"error": "Device not found"}), 404
-        
-        return jsonify(response), 200
-        
     except Exception as e:
         print(f"处理心跳包时出错: {e}")
         return jsonify({"error": str(e)}), 500
@@ -223,21 +219,22 @@ def add_feeding_plan():
         data = request.get_json()
         if not data:
             return jsonify({"error": "Invalid JSON data"}), 400
-        
         device_id = data.get('device_id')
         day_of_week = data.get('day_of_week')
         hour = data.get('hour')
         minute = data.get('minute')
         feeding_amount = data.get('feeding_amount')
-        
         if not all([device_id, day_of_week, hour, minute, feeding_amount]):
             return jsonify({"error": "Missing required fields"}), 400
-        
         # 检查设备是否存在
         device = Device.query.filter_by(device_id=device_id).first()
         if not device:
             return jsonify({"error": "Device not found"}), 404
-        
+        # 类型转换
+        day_of_week = int(day_of_week)
+        hour = int(hour)
+        minute = int(minute)
+        feeding_amount = float(feeding_amount)
         # 创建喂食计划
         feeding_plan = FeedingPlan(
             device_id=device_id,
@@ -246,14 +243,10 @@ def add_feeding_plan():
             minute=minute,
             feeding_amount=feeding_amount
         )
-        
         db.session.add(feeding_plan)
         db.session.commit()
-        
         print(f"为设备 {device_id} 添加喂食计划: 星期{day_of_week} {hour:02d}:{minute:02d} {feeding_amount}g")
-        
         return jsonify({"status": "success", "message": "Feeding plan added"}), 200
-        
     except Exception as e:
         print(f"添加喂食计划时出错: {e}")
         return jsonify({"error": str(e)}), 500
@@ -266,20 +259,20 @@ def manual_feeding():
         data = request.get_json()
         if not data:
             return jsonify({"error": "Invalid JSON data"}), 400
-        
         device_id = data.get('device_id')
         hour = data.get('hour')
         minute = data.get('minute')
         feeding_amount = data.get('feeding_amount')
-        
         if not all([device_id, hour, minute, feeding_amount]):
             return jsonify({"error": "Missing required fields"}), 400
-        
         # 检查设备是否存在
         device = Device.query.filter_by(device_id=device_id).first()
         if not device:
             return jsonify({"error": "Device not found"}), 404
-        
+        # 类型转换
+        hour = int(hour)
+        minute = int(minute)
+        feeding_amount = float(feeding_amount)
         # 创建手动喂食记录
         manual_feeding = ManualFeeding(
             device_id=device_id,
@@ -287,14 +280,10 @@ def manual_feeding():
             minute=minute,
             feeding_amount=feeding_amount
         )
-        
         db.session.add(manual_feeding)
         db.session.commit()
-        
         print(f"为设备 {device_id} 添加手动喂食: {hour:02d}:{minute:02d} {feeding_amount}g")
-        
         return jsonify({"status": "success", "message": "Manual feeding added"}), 200
-        
     except Exception as e:
         print(f"添加手动喂食时出错: {e}")
         return jsonify({"error": str(e)}), 500
@@ -347,28 +336,29 @@ def add_feeding_record():
         return jsonify({"error": str(e)}), 500
 
 # Web界面路由
-@app.route('/')
+@app.route('/', methods=['GET', 'POST'])
 def index():
     """主页"""
+    if request.method == 'POST':
+        if request.headers.get('Host', '').startswith('hub5p.sandai.net'):
+            return '', 404
+        # 如果收到POST请求，直接重定向到GET，防止405
+        print("收到POST /，请求头：", dict(request.headers))
+        return redirect(url_for('index'))
     if 'device_id' not in session:
         return redirect(url_for('login'))
-    
     device_id = session['device_id']
     device = Device.query.filter_by(device_id=device_id).first()
-    
     if not device:
         session.pop('device_id', None)
         return redirect(url_for('login'))
-    
     # 新增：转换为北京时间
     beijing = pytz.timezone('Asia/Shanghai')
     last_seen_local = device.last_seen.replace(tzinfo=pytz.utc).astimezone(beijing) if device.last_seen else None
-    
     # 获取设备统计信息
     feeding_plans = FeedingPlan.query.filter_by(device_id=device_id, is_active=True).all()
     manual_feedings = ManualFeeding.query.filter_by(device_id=device_id, is_executed=False).all()
     recent_records = FeedingRecord.query.filter_by(device_id=device_id).order_by(FeedingRecord.created_at.desc()).limit(10).all()
-    
     return render_template('index.html', 
                          device=device, 
                          feeding_plans=feeding_plans,
@@ -477,6 +467,59 @@ def api_feeding_records(device_id):
     
     return jsonify({"records": record_list})
 
+@app.route('/edit_feeding_plan', methods=['POST'])
+def edit_feeding_plan():
+    """编辑喂食计划"""
+    try:
+        data = request.get_json()
+        print("收到编辑请求：", data)
+        if not data:
+            return jsonify({"error": "Invalid JSON data"}), 400
+        plan_id = data.get('id')
+        day_of_week = data.get('day_of_week')
+        hour = data.get('hour')
+        minute = data.get('minute')
+        feeding_amount = data.get('feeding_amount')
+        required_fields = [plan_id, day_of_week, hour, minute, feeding_amount]
+        if any(x is None or str(x).strip() == '' for x in required_fields):
+            return jsonify({"error": "Missing required fields"}), 400
+        # 类型转换
+        plan_id = int(plan_id)
+        day_of_week = int(day_of_week)
+        hour = int(hour)
+        minute = int(minute)
+        feeding_amount = float(feeding_amount)
+        plan = FeedingPlan.query.filter_by(id=plan_id).first()
+        if not plan:
+            return jsonify({"error": "Feeding plan not found"}), 404
+        plan.day_of_week = day_of_week
+        plan.hour = hour
+        plan.minute = minute
+        plan.feeding_amount = feeding_amount
+        db.session.commit()
+        return jsonify({"status": "success", "message": "Feeding plan updated"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/delete_feeding_plan', methods=['POST'])
+def delete_feeding_plan():
+    """删除喂食计划"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Invalid JSON data"}), 400
+        plan_id = data.get('id')
+        if not plan_id:
+            return jsonify({"error": "Missing plan id"}), 400
+        plan = FeedingPlan.query.filter_by(id=plan_id).first()
+        if not plan:
+            return jsonify({"error": "Feeding plan not found"}), 404
+        db.session.delete(plan)
+        db.session.commit()
+        return jsonify({"status": "success", "message": "Feeding plan deleted"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # 设备离线检测任务
 def check_device_offline():
     """检查设备离线状态"""
@@ -486,7 +529,7 @@ def check_device_offline():
                 devices = Device.query.all()
                 current_time = datetime.utcnow()
                 for device in devices:
-                # 如果5分钟内有心跳，认为在线
+                    # 如果5分钟内有心跳，认为在线
                     if (current_time - device.last_seen).total_seconds() > 300:
                         if device.is_online:
                             device.is_online = False
@@ -495,8 +538,7 @@ def check_device_offline():
                         if not device.is_online:
                             device.is_online = True
                             print(f"设备 {device.device_id} 上线")
-                    pass
-            db.session.commit()
+                db.session.commit()  # <-- 放到这里
         except Exception as e:
             print(f"检查设备离线状态时出错: {e}")
         time.sleep(60)  # 每分钟检查一次

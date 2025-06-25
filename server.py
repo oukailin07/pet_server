@@ -213,8 +213,10 @@ def add_feeding_record():
     return jsonify({"status": "success", "feeding_record": json_data, "created_at": created_at})
 
 # 主页
-@app.route('/')
+@app.route('/', methods=['GET', 'POST'])
 def index():
+    if request.method == 'POST':
+        return jsonify({"msg": "POST received at /"})
     return render_template('index.html')
 
 if __name__ == '__main__':

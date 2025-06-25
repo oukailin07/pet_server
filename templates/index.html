@@ -1,111 +1,578 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ESP32 实时粮桶余粮监控</title>
-  <style>
-    body { font-family: Arial, sans-serif; text-align: center; }
-    h1 { margin-top: 20px; }
-    
-    /* 样式设置 */
-    #grain_bar {
-      width: 100px;  /* 固定宽度 */
-      height: 300px; /* 固定高度 */
-      background-color: #ddd;
-      margin: 20px auto;
-      border-radius: 10px;
-      position: relative;
-    }
-
-    #grain_level_bar {
-      width: 100%;
-      background-color: #4CAF50;
-      border-radius: 10px;
-      position: absolute;
-      bottom: 0;
-      text-align: center;
-      line-height: 30px;
-      color: white;
-      font-weight: bold;
-      font-size: 18px;
-    }
-
-    #grain_level_text {
-      font-size: 18px;
-      font-weight: bold;
-      margin-top: 10px;
-    }
-
-    #device_id {
-      font-size: 16px;
-      font-weight: normal;
-      margin-top: 5px;
-    }
-
-    /* 喂食计划样式 */
-    #feeding_plans {
-      margin-top: 20px;
-      text-align: left;
-      display: inline-block;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <title>宠物喂食器</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #f7f9fb;
+            font-family: 'Segoe UI', Arial, sans-serif;
+        }
+        .navbar {
+            background: #2563eb;
+            color: #fff;
+            padding: 0 32px;
+            height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 8px rgba(37,99,235,0.08);
+        }
+        .navbar .logo {
+            font-size: 22px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+        }
+        .navbar .logo::before {
+            content: '💙';
+            font-size: 22px;
+            margin-right: 8px;
+        }
+        .navbar .nav-right {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+        }
+        .navbar .device-id {
+            font-size: 15px;
+            opacity: 0.92;
+        }
+        .navbar .logout {
+            color: #fff;
+            text-decoration: none;
+            font-size: 15px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0;
+            opacity: 0.85;
+        }
+        .navbar .logout:hover {
+            text-decoration: underline;
+            opacity: 1;
+        }
+        .main-container {
+            max-width: 1200px;
+            margin: 32px auto 0 auto;
+            padding: 0 16px;
+        }
+        .status-cards {
+            display: flex;
+            gap: 24px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+        .status-card {
+            flex: 1 1 220px;
+            min-width: 200px;
+            background: linear-gradient(120deg, #4ade80 0%, #22d3ee 100%);
+            color: #fff;
+            border-radius: 16px;
+            box-shadow: 0 2px 12px rgba(34,211,238,0.08);
+            padding: 24px 18px 18px 24px;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            position: relative;
+        }
+        .status-card.status-online { background: linear-gradient(120deg, #34d399 0%, #38bdf8 100%); }
+        .status-card.status-weight { background: linear-gradient(120deg, #6366f1 0%, #818cf8 100%); }
+        .status-card.status-plan { background: linear-gradient(120deg, #fbbf24 0%, #f59e42 100%); }
+        .status-card.status-heartbeat { background: linear-gradient(120deg, #38bdf8 0%, #818cf8 100%); }
+        .status-card .card-title {
+            font-size: 17px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+        .status-card .card-value {
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+        .status-card .card-desc {
+            font-size: 14px;
+            opacity: 0.92;
+        }
+        .status-card .card-icon {
+            position: absolute;
+            top: 18px;
+            right: 18px;
+            font-size: 28px;
+            opacity: 0.18;
+        }
+        .actions-bar {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 18px;
+            align-items: center;
+        }
+        .actions-bar button, .actions-bar .export-btn {
+            padding: 8px 22px;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            color: #fff;
+            background: linear-gradient(90deg, #2563eb 0%, #6366f1 100%);
+            transition: background 0.2s;
+        }
+        .actions-bar .export-btn {
+            background: linear-gradient(90deg, #fbbf24 0%, #f59e42 100%);
+            color: #fff;
+        }
+        .actions-bar button:hover, .actions-bar .export-btn:hover {
+            filter: brightness(1.08);
+        }
+        .card-section {
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(60, 120, 200, 0.06);
+            margin-bottom: 22px;
+            padding: 18px 22px 18px 22px;
+        }
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #2563eb;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .section-title .icon { font-size: 20px; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #f8fafc;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        th, td {
+            border: 1px solid #e3e3e3;
+            padding: 10px 6px;
+            text-align: center;
+        }
+        th {
+            background: #e3f2fd;
+            color: #1976d2;
+            font-weight: 600;
+        }
+        .msg {
+            text-align: center;
+            color: #388e3c;
+            font-size: 16px;
+            margin: 8px 0 0 0;
+        }
+        .error {
+            color: #e53935;
+        }
+        @media (max-width: 900px) {
+            .status-cards { flex-direction: column; gap: 14px; }
+            .main-container { padding: 0 2vw; }
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0,0,0,0.35); /* 半透明遮罩 */
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.2s;
+        }
+        .modal-content {
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 4px 32px rgba(0,0,0,0.18);
+            padding: 32px 28px 24px 28px;
+            min-width: 320px;
+            max-width: 90vw;
+            position: relative;
+            z-index: 1001;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            animation: modalPopIn 0.18s cubic-bezier(.4,1.4,.6,1) 1;
+        }
+        @keyframes modalPopIn {
+            0% { transform: scale(0.92) translateY(40px); opacity: 0; }
+            100% { transform: scale(1) translateY(0); opacity: 1; }
+        }
+        .modal-actions {
+            display: flex;
+            gap: 18px;
+            justify-content: flex-end;
+            margin-top: 10px;
+        }
+        .modal-content h3 {
+            margin: 0 0 10px 0;
+            font-size: 20px;
+            color: #2563eb;
+            font-weight: 600;
+        }
+        .modal-content label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 15px;
+            color: #333;
+        }
+        .modal-content input, .modal-content select {
+            width: 100%;
+            padding: 7px 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 5px;
+            font-size: 15px;
+            margin-top: 4px;
+            margin-bottom: 10px;
+        }
+        .modal-content button {
+            padding: 7px 22px;
+            border: none;
+            border-radius: 6px;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+            color: #fff;
+            background: linear-gradient(90deg, #2563eb 0%, #6366f1 100%);
+            transition: background 0.2s;
+        }
+        .modal-content button[type="button"] {
+            background: #e3e3e3;
+            color: #333;
+        }
+        .modal-content button[type="button"]:hover {
+            background: #c7c7c7;
+        }
+        .modal-content button[type="submit"]:hover {
+            filter: brightness(1.08);
+        }
+        .modal .msg {
+            margin-top: 8px;
+            text-align: left;
+        }
+        @media (max-width: 600px) {
+            .modal-content { min-width: 90vw; padding: 18px 8vw 18px 8vw; }
+        }
+        .week-filter {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .week-btn {
+            padding: 5px 16px;
+            border: none;
+            border-radius: 5px;
+            background: #e3e8ef;
+            color: #2563eb;
+            font-size: 15px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background 0.18s, color 0.18s;
+        }
+        .week-btn.active, .week-btn:hover {
+            background: #2563eb;
+            color: #fff;
+        }
+    </style>
 </head>
 <body>
-  <h1>粮桶余粮监控</h1>
-  
-  <!-- 显示设备 ID 和粮桶余粮的文本和竖直柱形图 -->
-  <p>当前粮桶余粮：<span id="grain_level_text">Loading...</span></p>
-  
-  <div id="grain_bar">
-    <div id="grain_level_bar">0g</div>
-  </div>
-
-  <div id="feeding_plans">
-    <h2>喂食计划</h2>
-    <ul id="feeding_plan_list">
-      <!-- 喂食计划列表将在此显示 -->
-    </ul>
-  </div>
-
-  <script>
-    async function getGrainLevel() {
-      const res = await fetch('/get_grain_level');
-      const data = await res.json();
-      
-      // 获取当前粮桶余粮
-      const grainLevel = data.grain_level || 0;
-      const totalCapacity = 2000;  // 总容量2000g
-
-      // 更新粮桶余粮文本显示
-      document.getElementById('grain_level_text').innerText = `${grainLevel} g`;
-
-      // 更新竖直柱形图
-      const percentage = (grainLevel / totalCapacity) * 100;  // 计算百分比
-      const grainBar = document.getElementById('grain_level_bar');
-      grainBar.style.height = `${percentage}%`;  // 根据余粮百分比调整高度
-      grainBar.innerText = `${grainLevel} g`;
+    <div class="navbar">
+        <div class="logo">宠物喂食器</div>
+        <div class="nav-right">
+            <span class="device-id">📋 {{ device.device_id }}</span>
+            <a href="/logout" class="logout">退出</a>
+        </div>
+    </div>
+    <div class="main-container">
+        <div class="status-cards">
+            <div class="status-card status-online">
+                <div class="card-title">设备状态</div>
+                <div class="card-value">{{ '在线' if device.is_online else '离线' }}</div>
+                <div class="card-desc">最后心跳: {{ last_seen_local.strftime('%H:%M:%S') if last_seen_local else '-' }}</div>
+                <div class="card-icon">📶</div>
+            </div>
+            <div class="status-card status-weight">
+                <div class="card-title">粮桶重量</div>
+                <div class="card-value">{{ device.grain_weight }}g</div>
+                <div class="card-desc">更新时间: {{ device.last_grain_update.strftime('%H:%M:%S') if device.last_grain_update else '-' }}</div>
+                <div class="card-icon">📦</div>
+            </div>
+            <div class="status-card status-plan">
+                <div class="card-title">喂食计划</div>
+                <div class="card-value">{{ feeding_plans|length }}个</div>
+                <div class="card-desc">活跃计划数量</div>
+                <div class="card-icon">✅</div>
+            </div>
+            <div class="status-card status-heartbeat">
+                <div class="card-title">心跳次数</div>
+                <div class="card-value">{{ device.heartbeat_count }}</div>
+                <div class="card-desc">设备连接次数</div>
+                <div class="card-icon">⏰</div>
+            </div>
+        </div>
+        <div class="actions-bar">
+            <button onclick="showPlanModal()">➕ 添加喂食计划</button>
+            <button onclick="showManualFeedModal()">🤲 手动喂食</button>
+            <button onclick="location.reload()">🔄 刷新数据</button>
+            <a class="export-btn" href="/export_feeding_records/{{ device.device_id }}">⬇️ 导出数据</a>
+        </div>
+        <div class="card-section">
+            <div class="section-title"><span class="icon">📅</span>喂食计划</div>
+            <div class="week-filter">
+                <button type="button" class="week-btn active" data-week="0">全部</button>
+                <button type="button" class="week-btn" data-week="1">星期一</button>
+                <button type="button" class="week-btn" data-week="2">星期二</button>
+                <button type="button" class="week-btn" data-week="3">星期三</button>
+                <button type="button" class="week-btn" data-week="4">星期四</button>
+                <button type="button" class="week-btn" data-week="5">星期五</button>
+                <button type="button" class="week-btn" data-week="6">星期六</button>
+                <button type="button" class="week-btn" data-week="7">星期日</button>
+            </div>
+            <table>
+                <tr><th>ID</th><th>星期</th><th>小时</th><th>分钟</th><th>分量 (g)</th><th>操作</th></tr>
+                {% for plan in feeding_plans %}
+                <tr class="plan-row" data-week="{{ plan.day_of_week }}">
+                    <td>{{ plan.id }}</td>
+                    <td>{{ plan.day_of_week }}</td>
+                    <td>{{ '%02d'|format(plan.hour) }}</td>
+                    <td>{{ '%02d'|format(plan.minute) }}</td>
+                    <td>{{ plan.feeding_amount }}</td>
+                    <td>
+                        <button onclick="confirmDeletePlan({{ plan.id }})" style="background:#e53935; color:#fff; margin-left:6px;">删除</button>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6">暂无喂食计划</td></tr>
+                {% endfor %}
+            </table>
+        </div>
+        <div class="card-section">
+            <div class="section-title"><span class="icon">🤲</span>手动喂食</div>
+        </div>
+        <div class="card-section">
+            <div class="section-title"><span class="icon">🕒</span>最近喂食记录</div>
+            <table>
+                <tr><th>星期</th><th>小时</th><th>分钟</th><th>分量 (g)</th></tr>
+                {% for record in recent_records %}
+                <tr>
+                    <td>{{ record.day_of_week }}</td>
+                    <td>{{ '%02d'|format(record.hour) }}</td>
+                    <td>{{ '%02d'|format(record.minute) }}</td>
+                    <td>{{ record.feeding_amount }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="4">暂无喂食记录</td></tr>
+                {% endfor %}
+            </table>
+        </div>
+        <!-- 添加喂食计划弹窗 -->
+        <div class="modal" id="addPlanModal">
+            <div class="modal-content">
+                <h3>添加喂食计划</h3>
+                <form id="addPlanForm" onsubmit="return false;">
+                    <label>星期
+                        <select name="day_of_week" required>
+                            <option value="1">星期一</option>
+                            <option value="2">星期二</option>
+                            <option value="3">星期三</option>
+                            <option value="4">星期四</option>
+                            <option value="5">星期五</option>
+                            <option value="6">星期六</option>
+                            <option value="7">星期日</option>
+                        </select>
+                    </label>
+                    <label>小时
+                        <input type="number" name="hour" min="0" max="23" required>
+                    </label>
+                    <label>分钟
+                        <input type="number" name="minute" min="0" max="59" required>
+                    </label>
+                    <label>分量 (g)
+                        <input type="number" name="feeding_amount" min="1" max="500" required>
+                    </label>
+                    <div class="modal-actions">
+                        <button type="button" onclick="hideAddPlanModal()">取消</button>
+                        <button type="submit" class="add-plan-btn">添加</button>
+                    </div>
+                </form>
+                <div id="addPlanMsg" class="msg"></div>
+            </div>
+        </div>
+        <!-- 手动喂食弹窗 -->
+        <div class="modal" id="manualFeedModal">
+            <div class="modal-content">
+                <h3>手动喂食</h3>
+                <form id="manualFeedPopupForm" onsubmit="return false;">
+                    <label>小时
+                        <input type="number" name="hour" min="0" max="23" required>
+                    </label>
+                    <label>分钟
+                        <input type="number" name="minute" min="0" max="59" required>
+                    </label>
+                    <label>分量 (g)
+                        <input type="number" name="feeding_amount" min="1" max="500" required>
+                    </label>
+                    <div class="modal-actions">
+                        <button type="button" onclick="hideManualFeedModal()">取消</button>
+                        <button type="submit" class="feed-btn">立即喂食</button>
+                    </div>
+                </form>
+                <div id="manualFeedPopupMsg" class="msg"></div>
+            </div>
+        </div>
+        <!-- 删除确认弹窗 -->
+        <div class="modal" id="deletePlanModal">
+            <div class="modal-content">
+                <h3>确认删除</h3>
+                <div>确定要删除该喂食计划吗？</div>
+                <div class="modal-actions">
+                    <button type="button" onclick="hideDeletePlanModal()">取消</button>
+                    <button type="button" id="deletePlanBtn" style="background:#e53935; color:#fff;">删除</button>
+                </div>
+                <div id="deletePlanMsg" class="msg"></div>
+            </div>
+        </div>
+    </div>
+    <script>
+    // 删除弹窗控制
+    let deletePlanId = null;
+    function confirmDeletePlan(id) {
+        deletePlanId = id;
+        document.getElementById('deletePlanModal').style.display = 'flex';
+        document.getElementById('deletePlanMsg').innerText = '';
     }
-
-    async function getFeedingPlans() {
-      const res = await fetch('/get_feeding_plans');
-      const data = await res.json();
-
-      const feedingPlanList = document.getElementById('feeding_plan_list');
-      feedingPlanList.innerHTML = '';  // 清空现有的喂食计划
-
-      data.feeding_plans.forEach(plan => {
-        const listItem = document.createElement('li');
-        listItem.innerText = `设备ID: ${plan.device_id}, 星期: ${plan.day_of_week}, 时间: ${plan.hour}:${plan.minute}, 喂食量: ${plan.feeding_amount}g`;
-        feedingPlanList.appendChild(listItem);
-      });
+    function hideDeletePlanModal() {
+        document.getElementById('deletePlanModal').style.display = 'none';
     }
-
-    getGrainLevel();  // 页面加载时获取一次粮桶余粮
-    setInterval(getGrainLevel, 5000);  // 每5秒刷新一次粮桶余粮
-
-    getFeedingPlans();  // 页面加载时获取一次喂食计划
-    setInterval(getFeedingPlans, 5000);  // 每5秒刷新一次喂食计划
-  </script>
+    document.getElementById('deletePlanBtn').onclick = async function() {
+        if (!deletePlanId) return;
+        document.getElementById('deletePlanMsg').innerText = '删除中...';
+        try {
+            const res = await fetch('/delete_feeding_plan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({id: deletePlanId})
+            });
+            const result = await res.json();
+            if (res.ok) {
+                document.getElementById('deletePlanMsg').innerText = '删除成功！';
+                setTimeout(()=>{ location.reload(); }, 800);
+            } else {
+                document.getElementById('deletePlanMsg').innerText = result.error || '删除失败';
+            }
+        } catch(err) {
+            document.getElementById('deletePlanMsg').innerText = '网络错误';
+        }
+    };
+    // 点击弹窗外关闭
+    ['deletePlanModal'].forEach(id=>{
+        document.getElementById(id).onclick = function(e) {
+            if(e.target === this) this.style.display = 'none';
+        };
+    });
+    // 添加喂食计划弹窗控制
+    function showPlanModal() {
+        document.getElementById('addPlanModal').style.display = 'flex';
+        document.getElementById('addPlanMsg').innerText = '';
+        document.getElementById('addPlanForm').reset();
+    }
+    function hideAddPlanModal() {
+        document.getElementById('addPlanModal').style.display = 'none';
+    }
+    document.getElementById('addPlanForm').onsubmit = async function(e) {
+        e.preventDefault();
+        const form = e.target;
+        const data = {
+            device_id: "{{ device.device_id }}",
+            day_of_week: form.day_of_week.value,
+            hour: form.hour.value,
+            minute: form.minute.value,
+            feeding_amount: form.feeding_amount.value
+        };
+        document.getElementById('addPlanMsg').innerText = '提交中...';
+        try {
+            const res = await fetch('/add_feeding_plan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const result = await res.json();
+            if (res.ok) {
+                document.getElementById('addPlanMsg').innerText = '添加成功！';
+                setTimeout(()=>{ location.reload(); }, 800);
+            } else {
+                document.getElementById('addPlanMsg').innerText = result.error || '添加失败';
+            }
+        } catch(err) {
+            document.getElementById('addPlanMsg').innerText = '网络错误';
+        }
+    };
+    document.getElementById('addPlanModal').onclick = function(e) {
+        if(e.target === this) this.style.display = 'none';
+    };
+    // 手动喂食弹窗控制
+    function showManualFeedModal() {
+        document.getElementById('manualFeedModal').style.display = 'flex';
+        document.getElementById('manualFeedPopupMsg').innerText = '';
+        document.getElementById('manualFeedPopupForm').reset();
+    }
+    function hideManualFeedModal() {
+        document.getElementById('manualFeedModal').style.display = 'none';
+    }
+    document.getElementById('manualFeedPopupForm').onsubmit = async function(e) {
+        e.preventDefault();
+        const form = e.target;
+        const data = {
+            device_id: "{{ device.device_id }}",
+            hour: form.hour.value,
+            minute: form.minute.value,
+            feeding_amount: form.feeding_amount.value
+        };
+        document.getElementById('manualFeedPopupMsg').innerText = '提交中...';
+        try {
+            const res = await fetch('/manual_feeding', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const result = await res.json();
+            if (res.ok) {
+                document.getElementById('manualFeedPopupMsg').innerText = '喂食成功！';
+                setTimeout(()=>{ location.reload(); }, 800);
+            } else {
+                document.getElementById('manualFeedPopupMsg').innerText = result.error || '喂食失败';
+            }
+        } catch(err) {
+            document.getElementById('manualFeedPopupMsg').innerText = '网络错误';
+        }
+    };
+    document.getElementById('manualFeedModal').onclick = function(e) {
+        if(e.target === this) this.style.display = 'none';
+    };
+    // 喂食计划星期筛选
+    document.querySelectorAll('.week-btn').forEach(btn => {
+        btn.onclick = function() {
+            document.querySelectorAll('.week-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const week = btn.getAttribute('data-week');
+            document.querySelectorAll('.plan-row').forEach(row => {
+                if (week === '0' || row.getAttribute('data-week') === week) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        };
+    });
+    </script>
 </body>
 </html>
