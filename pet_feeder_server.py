@@ -24,17 +24,27 @@ import threading
 import time
 from werkzeug.security import generate_password_hash, check_password_hash
 import pytz  # 新增
+import websockets
+import asyncio
+from sqlalchemy import text
 
 app = Flask(__name__)
 app.secret_key = 'pet_feeder_secret_key_2024'
 
 # 数据库配置
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///pet_feeder.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///pet_feeder.db?timeout=30'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
+# 设置WAL模式提升并发能力
+with app.app_context():
+    db.session.execute(text('PRAGMA journal_mode=WAL;'))
+    db.session.commit()
+
 # 设备信息存储
 devices = {}
+connected_devices = {}
+ws_loop = None
 
 # 数据库模型
 class Device(db.Model):
@@ -216,6 +226,8 @@ def upload_grain_level():
 def add_feeding_plan():
     """添加喂食计划"""
     try:
+        print("原始请求体：", request.get_data(as_text=True))
+        print("Content-Type：", request.content_type)
         data = request.get_json()
         if not data:
             return jsonify({"error": "Invalid JSON data"}), 400
@@ -224,18 +236,20 @@ def add_feeding_plan():
         hour = data.get('hour')
         minute = data.get('minute')
         feeding_amount = data.get('feeding_amount')
+        print(f"[{datetime.now()}] 收到喂食计划请求:")
+        print(f"  设备ID: {device_id}")
+        print(f"  星期: {day_of_week}")
+        print(f"  时间: {hour}:{minute}")
+        print(f"  分量: {feeding_amount}g")
         if not all([device_id, day_of_week, hour, minute, feeding_amount]):
             return jsonify({"error": "Missing required fields"}), 400
-        # 检查设备是否存在
         device = Device.query.filter_by(device_id=device_id).first()
         if not device:
             return jsonify({"error": "Device not found"}), 404
-        # 类型转换
         day_of_week = int(day_of_week)
         hour = int(hour)
         minute = int(minute)
         feeding_amount = float(feeding_amount)
-        # 创建喂食计划
         feeding_plan = FeedingPlan(
             device_id=device_id,
             day_of_week=day_of_week,
@@ -246,7 +260,22 @@ def add_feeding_plan():
         db.session.add(feeding_plan)
         db.session.commit()
         print(f"为设备 {device_id} 添加喂食计划: 星期{day_of_week} {hour:02d}:{minute:02d} {feeding_amount}g")
-        return jsonify({"status": "success", "message": "Feeding plan added"}), 200
+        response = {"status": "success", "message": "Feeding plan added"}
+        print("喂食计划响应内容：", response)
+        # 推送到设备
+        ws = connected_devices.get(device_id)
+        if ws and ws_loop:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    ws.send(json.dumps(data)),
+                    ws_loop
+                )
+                print(f"已通过WebSocket下发到 {device_id}: {data}")
+            except Exception as e:
+                print(f"WebSocket下发失败: {e}")
+        else:
+            print(f"设备 {device_id} 未连接WebSocket，无法下发")
+        return jsonify(response), 200
     except Exception as e:
         print(f"添加喂食计划时出错: {e}")
         return jsonify({"error": str(e)}), 500
@@ -256,6 +285,8 @@ def add_feeding_plan():
 def manual_feeding():
     """手动喂食"""
     try:
+        print("原始请求体：", request.get_data(as_text=True))
+        print("Content-Type：", request.content_type)
         data = request.get_json()
         if not data:
             return jsonify({"error": "Invalid JSON data"}), 400
@@ -263,6 +294,10 @@ def manual_feeding():
         hour = data.get('hour')
         minute = data.get('minute')
         feeding_amount = data.get('feeding_amount')
+        print(f"[{datetime.now()}] 收到手动喂食请求:")
+        print(f"  设备ID: {device_id}")
+        print(f"  时间: {hour}:{minute}")
+        print(f"  分量: {feeding_amount}g")
         if not all([device_id, hour, minute, feeding_amount]):
             return jsonify({"error": "Missing required fields"}), 400
         # 检查设备是否存在
@@ -283,7 +318,22 @@ def manual_feeding():
         db.session.add(manual_feeding)
         db.session.commit()
         print(f"为设备 {device_id} 添加手动喂食: {hour:02d}:{minute:02d} {feeding_amount}g")
-        return jsonify({"status": "success", "message": "Manual feeding added"}), 200
+        response = {"status": "success", "message": "Manual feeding added"}
+        print("手动喂食响应内容：", response)
+        # --- WebSocket下发 ---
+        ws = connected_devices.get(device_id)
+        if ws and ws_loop:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    ws.send(json.dumps(data)),
+                    ws_loop
+                )
+                print(f"已通过WebSocket下发手动喂食到 {device_id}: {data}")
+            except Exception as e:
+                print(f"WebSocket下发手动喂食失败: {e}")
+        else:
+            print(f"设备 {device_id} 未连接WebSocket，无法下发手动喂食")
+        return jsonify(response), 200
     except Exception as e:
         print(f"添加手动喂食时出错: {e}")
         return jsonify({"error": str(e)}), 500
@@ -342,7 +392,6 @@ def index():
     if request.method == 'POST':
         if request.headers.get('Host', '').startswith('hub5p.sandai.net'):
             return '', 404
-        # 如果收到POST请求，直接重定向到GET，防止405
         print("收到POST /，请求头：", dict(request.headers))
         return redirect(url_for('index'))
     if 'device_id' not in session:
@@ -352,19 +401,33 @@ def index():
     if not device:
         session.pop('device_id', None)
         return redirect(url_for('login'))
-    # 新增：转换为北京时间
     beijing = pytz.timezone('Asia/Shanghai')
     last_seen_local = device.last_seen.replace(tzinfo=pytz.utc).astimezone(beijing) if device.last_seen else None
-    # 获取设备统计信息
+    last_grain_update_local = device.last_grain_update.replace(tzinfo=pytz.utc).astimezone(beijing) if device.last_grain_update else None
     feeding_plans = FeedingPlan.query.filter_by(device_id=device_id, is_active=True).all()
     manual_feedings = ManualFeeding.query.filter_by(device_id=device_id, is_executed=False).all()
+    recent_manual_feedings = ManualFeeding.query.filter_by(device_id=device_id).order_by(ManualFeeding.created_at.desc()).limit(10).all()
     recent_records = FeedingRecord.query.filter_by(device_id=device_id).order_by(FeedingRecord.created_at.desc()).limit(10).all()
+    # 合并喂食计划
+    merged_plans = {}
+    for plan in feeding_plans:
+        key = f"{plan.day_of_week}-{plan.hour}-{plan.minute}"
+        merged_plans[key] = merged_plans.get(key, 0) + plan.feeding_amount
+    # 合并手动喂食
+    merged_manuals = {}
+    for m in recent_manual_feedings:
+        key = f"{m.hour}-{m.minute}-{1 if m.is_executed else 0}"
+        merged_manuals[key] = merged_manuals.get(key, 0) + m.feeding_amount
     return render_template('index.html', 
                          device=device, 
                          feeding_plans=feeding_plans,
                          manual_feedings=manual_feedings,
+                         recent_manual_feedings=recent_manual_feedings,
                          recent_records=recent_records,
-                         last_seen_local=last_seen_local)
+                         last_seen_local=last_seen_local,
+                         last_grain_update_local=last_grain_update_local,
+                         merged_plans=merged_plans,
+                         merged_manuals=merged_manuals)
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -404,11 +467,10 @@ def api_devices():
     """API: 获取所有设备"""
     devices = Device.query.all()
     device_list = []
-    
+    beijing = pytz.timezone('Asia/Shanghai')
     for device in devices:
         # 检查设备是否在线（5分钟内有心跳）
         is_online = (datetime.utcnow() - device.last_seen).total_seconds() < 300
-        
         device_info = {
             'device_id': device.device_id,
             'device_type': device.device_type,
@@ -418,10 +480,9 @@ def api_devices():
             'last_seen': device.last_seen.strftime('%Y-%m-%d %H:%M:%S'),
             'is_online': is_online,
             'grain_weight': device.grain_weight,
-            'last_grain_update': device.last_grain_update.strftime('%Y-%m-%d %H:%M:%S') if device.last_grain_update else None
+            'last_grain_update': device.last_grain_update.replace(tzinfo=pytz.utc).astimezone(beijing).strftime('%Y-%m-%d %H:%M:%S') if device.last_grain_update else None
         }
         device_list.append(device_info)
-    
     return jsonify({
         "total_devices": len(device_list),
         "devices": device_list
@@ -503,7 +564,6 @@ def edit_feeding_plan():
 
 @app.route('/delete_feeding_plan', methods=['POST'])
 def delete_feeding_plan():
-    """删除喂食计划"""
     try:
         data = request.get_json()
         if not data:
@@ -514,9 +574,72 @@ def delete_feeding_plan():
         plan = FeedingPlan.query.filter_by(id=plan_id).first()
         if not plan:
             return jsonify({"error": "Feeding plan not found"}), 404
+        device_id = plan.device_id
+        # 构造详细删除信息（不包含id）
+        plan_info = {
+            "day_of_week": plan.day_of_week,
+            "hour": plan.hour,
+            "minute": plan.minute,
+            "feeding_amount": plan.feeding_amount
+        }
         db.session.delete(plan)
         db.session.commit()
-        return jsonify({"status": "success", "message": "Feeding plan deleted"}), 200
+        response = {"status": "success", "message": "Feeding plan deleted"}
+        # --- WebSocket下发删除通知 ---
+        ws = connected_devices.get(device_id)
+        if ws and ws_loop:
+            try:
+                msg = {"type": "delete_feeding_plan", **plan_info}
+                asyncio.run_coroutine_threadsafe(
+                    ws.send(json.dumps(msg)),
+                    ws_loop
+                )
+                print(f"已通过WebSocket通知设备 {device_id} 删除喂食计划: {msg}")
+            except Exception as e:
+                print(f"WebSocket下发删除喂食计划失败: {e}")
+        else:
+            print(f"设备 {device_id} 未连接WebSocket，无法下发删除喂食计划")
+        return jsonify(response), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/delete_manual_feeding', methods=['POST'])
+def delete_manual_feeding():
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Invalid JSON data"}), 400
+        manual_id = data.get('id')
+        if not manual_id:
+            return jsonify({"error": "Missing manual id"}), 400
+        manual = ManualFeeding.query.filter_by(id=manual_id).first()
+        if not manual:
+            return jsonify({"error": "Manual feeding not found"}), 404
+        device_id = manual.device_id
+        # 构造详细删除信息（不包含id）
+        manual_info = {
+            "hour": manual.hour,
+            "minute": manual.minute,
+            "feeding_amount": manual.feeding_amount
+        }
+        db.session.delete(manual)
+        db.session.commit()
+        response = {"status": "success", "message": "Manual feeding deleted"}
+        # --- WebSocket下发删除通知 ---
+        ws = connected_devices.get(device_id)
+        if ws and ws_loop:
+            try:
+                msg = {"type": "delete_manual_feeding", **manual_info}
+                asyncio.run_coroutine_threadsafe(
+                    ws.send(json.dumps(msg)),
+                    ws_loop
+                )
+                print(f"已通过WebSocket通知设备 {device_id} 删除手动喂食: {msg}")
+            except Exception as e:
+                print(f"WebSocket下发删除手动喂食失败: {e}")
+        else:
+            print(f"设备 {device_id} 未连接WebSocket，无法下发删除手动喂食")
+        return jsonify(response), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -550,9 +673,94 @@ def create_tables():
         db.create_all()
         print("数据库表创建完成")
 
+# WebSocket服务
+async def ws_handler(websocket, path):
+    device_id = None
+    try:
+        register_msg = await websocket.recv()
+        data = json.loads(register_msg)
+        device_id = data.get("device_id")
+        if not device_id:
+            await websocket.send(json.dumps({"error": "no device_id"}))
+            return
+        connected_devices[device_id] = websocket
+        print(f"设备 {device_id} 已连接 WebSocket")
+        await websocket.send(json.dumps({"status": "registered"}))
+        # 保持连接
+        while True:
+            msg = await websocket.recv()
+            print(f"收到设备 {device_id} 消息: {msg}")
+            try:
+                msg_data = json.loads(msg)
+                if msg_data.get('type') == 'feeding_record':
+                    # 保存到数据库
+                    with app.app_context():
+                        record = FeedingRecord(
+                            device_id=msg_data.get('device_id'),
+                            day_of_week=msg_data.get('day_of_week'),
+                            hour=msg_data.get('hour'),
+                            minute=msg_data.get('minute'),
+                            feeding_amount=msg_data.get('feeding_amount'),
+                            actual_amount=msg_data.get('feeding_amount'),
+                            status='success',
+                            created_at=datetime.utcfromtimestamp(msg_data.get('timestamp', datetime.utcnow().timestamp()))
+                        )
+                        db.session.add(record)
+                        db.session.commit()
+                        print(f"已保存喂食记录到数据库: {msg_data}")
+                elif msg_data.get('type') == 'manual_feeding':
+                    # 保存手动喂食到数据库（如有未执行的同时间同分量记录则只更新最早一条为已执行）
+                    with app.app_context():
+                        manual = ManualFeeding.query.filter_by(
+                            device_id=msg_data.get('device_id'),
+                            hour=msg_data.get('hour'),
+                            minute=msg_data.get('minute'),
+                            feeding_amount=msg_data.get('feeding_amount'),
+                            is_executed=False
+                        ).order_by(ManualFeeding.created_at.asc()).first()
+                        if manual:
+                            manual.is_executed = True
+                            manual.executed_at = datetime.utcfromtimestamp(msg_data.get('timestamp', datetime.utcnow().timestamp()))
+                            db.session.commit()
+                            print(f"已更新手动喂食为已执行: {msg_data}")
+                        else:
+                            manual = ManualFeeding(
+                                device_id=msg_data.get('device_id'),
+                                hour=msg_data.get('hour'),
+                                minute=msg_data.get('minute'),
+                                feeding_amount=msg_data.get('feeding_amount'),
+                                is_executed=True,
+                                executed_at=datetime.utcfromtimestamp(msg_data.get('timestamp', datetime.utcnow().timestamp())),
+                                created_at=datetime.utcfromtimestamp(msg_data.get('timestamp', datetime.utcnow().timestamp()))
+                            )
+                            db.session.add(manual)
+                            db.session.commit()
+                            print(f"已保存手动喂食到数据库: {msg_data}")
+            except Exception as e:
+                print(f"处理设备消息时出错: {e}")
+    except Exception as e:
+        print(f"设备 {device_id} 断开: {e}")
+    finally:
+        if device_id in connected_devices:
+            del connected_devices[device_id]
+
+# 启动WebSocket服务器线程
+def start_ws_server():
+    global ws_loop
+    ws_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(ws_loop)
+    ws_server = websockets.serve(ws_handler, "0.0.0.0", 8765)
+    print("WebSocket服务器已启动，监听端口8765")
+    ws_loop.run_until_complete(ws_server)
+    ws_loop.run_forever()
+
 if __name__ == "__main__":
     import threading
     t = threading.Thread(target=check_device_offline, daemon=True)
     t.start()
     print("设备离线检测任务已启动")
+    # 启动WebSocket服务线程
+    t = threading.Thread(target=start_ws_server, daemon=True)
+    t.start()
+    # 启动Flask
     app.run(host="0.0.0.0", port=80) 

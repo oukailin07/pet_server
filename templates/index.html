@@ -303,7 +303,7 @@
             <div class="status-card status-weight">
                 <div class="card-title">粮桶重量</div>
                 <div class="card-value">{{ device.grain_weight }}g</div>
-                <div class="card-desc">更新时间: {{ device.last_grain_update.strftime('%H:%M:%S') if device.last_grain_update else '-' }}</div>
+                <div class="card-desc">更新时间: {{ last_grain_update_local.strftime('%H:%M:%S') if last_grain_update_local else '-' }}</div>
                 <div class="card-icon">📦</div>
             </div>
             <div class="status-card status-plan">
@@ -326,51 +326,55 @@
             <a class="export-btn" href="/export_feeding_records/{{ device.device_id }}">⬇️ 导出数据</a>
         </div>
         <div class="card-section">
-            <div class="section-title"><span class="icon">📅</span>喂食计划</div>
-            <div class="week-filter">
-                <button type="button" class="week-btn active" data-week="0">全部</button>
-                <button type="button" class="week-btn" data-week="1">星期一</button>
-                <button type="button" class="week-btn" data-week="2">星期二</button>
-                <button type="button" class="week-btn" data-week="3">星期三</button>
-                <button type="button" class="week-btn" data-week="4">星期四</button>
-                <button type="button" class="week-btn" data-week="5">星期五</button>
-                <button type="button" class="week-btn" data-week="6">星期六</button>
-                <button type="button" class="week-btn" data-week="7">星期日</button>
-            </div>
+            <div class="section-title"><span class="icon">📅</span>合并后喂食计划</div>
             <table>
-                <tr><th>ID</th><th>星期</th><th>小时</th><th>分钟</th><th>分量 (g)</th><th>操作</th></tr>
-                {% for plan in feeding_plans %}
-                <tr class="plan-row" data-week="{{ plan.day_of_week }}">
-                    <td>{{ plan.id }}</td>
-                    <td>{{ plan.day_of_week }}</td>
-                    <td>{{ '%02d'|format(plan.hour) }}</td>
-                    <td>{{ '%02d'|format(plan.minute) }}</td>
-                    <td>{{ plan.feeding_amount }}</td>
-                    <td>
-                        <button onclick="confirmDeletePlan({{ plan.id }})" style="background:#e53935; color:#fff; margin-left:6px;">删除</button>
-                    </td>
+                <tr><th>星期</th><th>小时</th><th>分钟</th><th>总分量 (g)</th></tr>
+                {% for key, total in merged_plans.items() %}
+                {% set parts = key.split('-') %}
+                <tr>
+                    <td>{{ parts[0] }}</td>
+                    <td>{{ '%02d'|format(parts[1]|int) }}</td>
+                    <td>{{ '%02d'|format(parts[2]|int) }}</td>
+                    <td>{{ total }}</td>
                 </tr>
                 {% else %}
-                <tr><td colspan="6">暂无喂食计划</td></tr>
+                <tr><td colspan="4">暂无喂食计划</td></tr>
                 {% endfor %}
             </table>
         </div>
         <div class="card-section">
-            <div class="section-title"><span class="icon">🤲</span>手动喂食</div>
+            <div class="section-title"><span class="icon">🤲</span>合并后手动喂食记录</div>
+            <table>
+                <tr><th>小时</th><th>分钟</th><th>总分量 (g)</th><th>状态</th></tr>
+                {% for key, total in merged_manuals.items() %}
+                {% set parts = key.split('-') %}
+                <tr>
+                    <td>{{ '%02d'|format(parts[0]|int) }}</td>
+                    <td>{{ '%02d'|format(parts[1]|int) }}</td>
+                    <td>{{ total }}</td>
+                    <td>{{ '已执行' if parts[2] == '1' else '待执行' }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="4">暂无手动喂食记录</td></tr>
+                {% endfor %}
+            </table>
         </div>
         <div class="card-section">
             <div class="section-title"><span class="icon">🕒</span>最近喂食记录</div>
             <table>
-                <tr><th>星期</th><th>小时</th><th>分钟</th><th>分量 (g)</th></tr>
+                <tr><th>星期</th><th>小时</th><th>分钟</th><th>分量 (g)</th><th>实际 (g)</th><th>状态</th><th>时间</th></tr>
                 {% for record in recent_records %}
                 <tr>
                     <td>{{ record.day_of_week }}</td>
                     <td>{{ '%02d'|format(record.hour) }}</td>
                     <td>{{ '%02d'|format(record.minute) }}</td>
                     <td>{{ record.feeding_amount }}</td>
+                    <td>{{ record.actual_amount }}</td>
+                    <td>{{ record.status }}</td>
+                    <td>{{ record.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
                 </tr>
                 {% else %}
-                <tr><td colspan="4">暂无喂食记录</td></tr>
+                <tr><td colspan="7">暂无喂食记录</td></tr>
                 {% endfor %}
             </table>
         </div>
@@ -484,6 +488,15 @@
         document.getElementById('addPlanModal').style.display = 'flex';
         document.getElementById('addPlanMsg').innerText = '';
         document.getElementById('addPlanForm').reset();
+        // 设置默认值：当前时间，分量50，星期
+        const now = new Date();
+        document.querySelector('#addPlanForm [name="hour"]').value = now.getHours();
+        document.querySelector('#addPlanForm [name="minute"]').value = now.getMinutes();
+        document.querySelector('#addPlanForm [name="feeding_amount"]').value = 50;
+        // JS: getDay() 0=周日, 1=周一... 需转为1-7
+        let jsDay = now.getDay();
+        let planDay = jsDay === 0 ? 7 : jsDay;
+        document.querySelector('#addPlanForm [name="day_of_week"]').value = planDay;
     }
     function hideAddPlanModal() {
         document.getElementById('addPlanModal').style.display = 'none';
@@ -524,6 +537,11 @@
         document.getElementById('manualFeedModal').style.display = 'flex';
         document.getElementById('manualFeedPopupMsg').innerText = '';
         document.getElementById('manualFeedPopupForm').reset();
+        // 设置默认值：当前时间，分量50
+        const now = new Date();
+        document.querySelector('#manualFeedPopupForm [name="hour"]').value = now.getHours();
+        document.querySelector('#manualFeedPopupForm [name="minute"]').value = now.getMinutes();
+        document.querySelector('#manualFeedPopupForm [name="feeding_amount"]').value = 50;
     }
     function hideManualFeedModal() {
         document.getElementById('manualFeedModal').style.display = 'none';
@@ -573,6 +591,26 @@
             });
         };
     });
+    // 合并喂食计划
+    {% set merged_plans = {} %}
+    {% for plan in feeding_plans %}
+        {% set key = plan.day_of_week ~ '-' ~ plan.hour ~ '-' ~ plan.minute %}
+        {% if key in merged_plans %}
+            {% set _ = merged_plans.__setitem__(key, merged_plans[key] + plan.feeding_amount) %}
+        {% else %}
+            {% set _ = merged_plans.__setitem__(key, plan.feeding_amount) %}
+        {% endif %}
+    {% endfor %}
+    // 合并手动喂食
+    {% set merged_manuals = {} %}
+    {% for m in recent_manual_feedings %}
+        {% set key = m.hour ~ '-' ~ m.minute ~ '-' ~ (m.is_executed and '1' or '0') %}
+        {% if key in merged_manuals %}
+            {% set _ = merged_manuals.__setitem__(key, merged_manuals[key] + m.feeding_amount) %}
+        {% else %}
+            {% set _ = merged_manuals.__setitem__(key, m.feeding_amount) %}
+        {% endif %}
+    {% endfor %}
     </script>
 </body>
 </html>
