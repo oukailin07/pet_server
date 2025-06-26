@@ -84,6 +84,7 @@
         .status-card.status-weight { background: linear-gradient(120deg, #6366f1 0%, #818cf8 100%); }
         .status-card.status-plan { background: linear-gradient(120deg, #fbbf24 0%, #f59e42 100%); }
         .status-card.status-heartbeat { background: linear-gradient(120deg, #38bdf8 0%, #818cf8 100%); }
+        .status-card.status-chart { background: linear-gradient(120deg, #60a5fa 0%, #818cf8 100%); }
         .status-card .card-title {
             font-size: 17px;
             font-weight: 500;
@@ -297,38 +298,68 @@
             <div class="status-card status-online">
                 <div class="card-title">设备状态</div>
                 <div class="card-value">{{ '在线' if device.is_online else '离线' }}</div>
-                <div class="card-desc">最后心跳: {{ last_seen_local.strftime('%H:%M:%S') if last_seen_local else '-' }}</div>
                 <div class="card-icon">📶</div>
             </div>
             <div class="status-card status-weight">
                 <div class="card-title">粮桶重量</div>
                 <div class="card-value">{{ device.grain_weight }}g</div>
                 <div class="card-desc">更新时间: {{ last_grain_update_local.strftime('%H:%M:%S') if last_grain_update_local else '-' }}</div>
-                <div class="card-icon">📦</div>
+                <div style="position:absolute;top:18px;right:18px;display:flex;flex-direction:column;align-items:center;">
+                    {% set percent = (device.grain_weight / 2000.0) if device.grain_weight < 2000 else 1.0 %}
+                    <svg width="80" height="120" viewBox="0 0 80 120">
+                        <defs>
+                            <clipPath id="siloFillClip">
+                                <rect x="20" y="22" width="40" height="60" rx="14"/>
+                            </clipPath>
+                        </defs>
+                        <!-- 粮仓外轮廓 -->
+                        <ellipse cx="40" cy="22" rx="20" ry="10" fill="#f5f5f5" stroke="#bbb" stroke-width="2"/>
+                        <rect x="20" y="22" width="40" height="60" rx="14" fill="#f5f5f5" stroke="#bbb" stroke-width="2"/>
+                        <ellipse cx="40" cy="82" rx="20" ry="10" fill="#f5f5f5" stroke="#bbb" stroke-width="2"/>
+                        <!-- 粮食填充 -->
+                        {% set fill_h = 60 * percent %}
+                        <rect x="20" y="{{ 22+60-fill_h }}" width="40" height="{{ fill_h }}" fill="#7c4a03" clip-path="url(#siloFillClip)"/>
+                        <!-- 高光 -->
+                        <ellipse cx="32" cy="52" rx="5" ry="22" fill="#fff" fill-opacity="0.10"/>
+                        <!-- 盖子 -->
+                        <ellipse cx="40" cy="14" rx="22" ry="6" fill="#e0e0e0"/>
+                        <ellipse cx="40" cy="14" rx="16" ry="4" fill="#fff" fill-opacity="0.7"/>
+                        <!-- 出粮口 -->
+                        <rect x="34" y="82" width="12" height="10" rx="4" fill="#e0e0e0" stroke="#bbb" stroke-width="1.5"/>
+                        <ellipse cx="40" cy="92" rx="6" ry="3" fill="#e0e0e0" stroke="#bbb" stroke-width="1.5"/>
+                        <!-- 碗 -->
+                        <rect x="16" y="92" width="48" height="20" rx="10" fill="#f5f5f5" stroke="#bbb" stroke-width="2"/>
+                        <ellipse cx="40" cy="112" rx="24" ry="6" fill="#e0e0e0"/>
+                        <!-- 碗内粮食 -->
+                        <ellipse cx="40" cy="104" rx="16" ry="5" fill="#7c4a03" fill-opacity="0.7"/>
+                        <ellipse cx="40" cy="108" rx="12" ry="3" fill="#7c4a03" fill-opacity="0.5"/>
+                    </svg>
+                </div>
+                <div style="width:100%;text-align:center;font-size:14px;font-weight:bold;color:#444;margin-top:8px;letter-spacing:1px;">总容量2000g</div>
             </div>
-            <div class="status-card status-plan">
+            <div class="status-card status-plan" style="position:relative;">
                 <div class="card-title">喂食计划</div>
                 <div class="card-value">{{ feeding_plans|length }}个</div>
                 <div class="card-desc">活跃计划数量</div>
                 <div class="card-icon">✅</div>
             </div>
-            <div class="status-card status-heartbeat">
-                <div class="card-title">心跳次数</div>
-                <div class="card-value">{{ device.heartbeat_count }}</div>
-                <div class="card-desc">设备连接次数</div>
-                <div class="card-icon">⏰</div>
+            <div class="status-card status-chart" style="background:linear-gradient(120deg,#60a5fa 0%,#818cf8 100%);color:#fff;">
+                <div class="card-title">喂食记录图表</div>
+                <div class="card-value" style="margin-bottom:12px;">可视化分析</div>
+                <button onclick="window.location.href='/feeding_chart'" style="padding:8px 18px;font-size:15px;border-radius:6px;background:#fff;color:#2563eb;border:none;cursor:pointer;font-weight:600;box-shadow:0 2px 8px #0002;">查看图表</button>
+                <div class="card-desc" style="margin-top:10px;font-size:13px;opacity:0.92;">点击进入查看24小时喂食量统计</div>
             </div>
         </div>
         <div class="actions-bar">
-            <button onclick="showPlanModal()">➕ 添加喂食计划</button>
-            <button onclick="showManualFeedModal()">🤲 手动喂食</button>
+            <button onclick="showPlanModal()" id="addPlanBtn" {% if not device.is_online %}disabled style="opacity:0.5;cursor:not-allowed;"{% endif %}>➕ 添加喂食计划</button>
+            <button onclick="showManualFeedModal()" id="manualFeedBtn" {% if not device.is_online %}disabled style="opacity:0.5;cursor:not-allowed;"{% endif %}>🤲 手动喂食</button>
             <button onclick="location.reload()">🔄 刷新数据</button>
             <a class="export-btn" href="/export_feeding_records/{{ device.device_id }}">⬇️ 导出数据</a>
         </div>
         <div class="card-section">
-            <div class="section-title"><span class="icon">📅</span>合并后喂食计划</div>
+            <div class="section-title"><span class="icon">📅</span>喂食计划</div>
             <table>
-                <tr><th>星期</th><th>小时</th><th>分钟</th><th>总分量 (g)</th></tr>
+                <tr><th>星期</th><th>小时</th><th>分钟</th><th>总分量 (g)</th><th>操作</th></tr>
                 {% for key, total in merged_plans.items() %}
                 {% set parts = key.split('-') %}
                 <tr>
@@ -336,35 +367,44 @@
                     <td>{{ '%02d'|format(parts[1]|int) }}</td>
                     <td>{{ '%02d'|format(parts[2]|int) }}</td>
                     <td>{{ total }}</td>
+                    <td>
+                        <button onclick="deleteMergedPlan('{{ key }}')" {% if not device.is_online %}disabled style="opacity:0.5;cursor:not-allowed;"{% endif %} style="color:#e53935;">删除</button>
+                    </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="4">暂无喂食计划</td></tr>
+                <tr><td colspan="5">暂无喂食计划</td></tr>
                 {% endfor %}
             </table>
         </div>
         <div class="card-section">
-            <div class="section-title"><span class="icon">🤲</span>合并后手动喂食记录</div>
+            <div class="section-title"><span class="icon">🤲</span>手动喂食</div>
             <table>
-                <tr><th>小时</th><th>分钟</th><th>总分量 (g)</th><th>状态</th></tr>
+                <tr><th>小时</th><th>分钟</th><th>总分量 (g)</th><th>状态</th><th>操作</th></tr>
                 {% for key, total in merged_manuals.items() %}
                 {% set parts = key.split('-') %}
+                {% if parts[2] == '0' %} {# 只显示待执行 #}
                 <tr>
                     <td>{{ '%02d'|format(parts[0]|int) }}</td>
                     <td>{{ '%02d'|format(parts[1]|int) }}</td>
                     <td>{{ total }}</td>
-                    <td>{{ '已执行' if parts[2] == '1' else '待执行' }}</td>
+                    <td>待执行</td>
+                    <td>
+                        <button onclick="deleteMergedManual('{{ key }}')" {% if not device.is_online %}disabled style="opacity:0.5;cursor:not-allowed;"{% endif %} style="color:#e53935;">删除</button>
+                    </td>
                 </tr>
+                {% endif %}
                 {% else %}
-                <tr><td colspan="4">暂无手动喂食记录</td></tr>
+                <tr><td colspan="5">暂无手动喂食记录</td></tr>
                 {% endfor %}
             </table>
         </div>
         <div class="card-section">
             <div class="section-title"><span class="icon">🕒</span>最近喂食记录</div>
             <table>
-                <tr><th>星期</th><th>小时</th><th>分钟</th><th>分量 (g)</th><th>实际 (g)</th><th>状态</th><th>时间</th></tr>
+                <tr><th>类型</th><th>星期</th><th>小时</th><th>分钟</th><th>分量 (g)</th><th>实际 (g)</th><th>状态</th><th>时间</th></tr>
                 {% for record in recent_records %}
                 <tr>
+                    <td>计划</td>
                     <td>{{ record.day_of_week }}</td>
                     <td>{{ '%02d'|format(record.hour) }}</td>
                     <td>{{ '%02d'|format(record.minute) }}</td>
@@ -373,8 +413,22 @@
                     <td>{{ record.status }}</td>
                     <td>{{ record.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
                 </tr>
+                {% endfor %}
+                {% for m in recent_manual_feedings %}
+                {% if m.is_executed %}
+                <tr>
+                    <td>手动</td>
+                    <td>-</td>
+                    <td>{{ '%02d'|format(m.hour) }}</td>
+                    <td>{{ '%02d'|format(m.minute) }}</td>
+                    <td>{{ m.feeding_amount }}</td>
+                    <td>{{ m.feeding_amount }}</td>
+                    <td>已执行</td>
+                    <td>{{ m.executed_at.strftime('%Y-%m-%d %H:%M:%S') if m.executed_at else '-' }}</td>
+                </tr>
+                {% endif %}
                 {% else %}
-                <tr><td colspan="7">暂无喂食记录</td></tr>
+                <tr><td colspan="8">暂无喂食记录</td></tr>
                 {% endfor %}
             </table>
         </div>
@@ -450,9 +504,20 @@
     // 删除弹窗控制
     let deletePlanId = null;
     function confirmDeletePlan(id) {
-        deletePlanId = id;
-        document.getElementById('deletePlanModal').style.display = 'flex';
-        document.getElementById('deletePlanMsg').innerText = '';
+        if (!id) return;
+        if (!confirm('确定要删除该喂食计划吗？')) return;
+        fetch('/delete_feeding_plan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({id: id})
+        }).then(res => res.json()).then(result => {
+            if (result.status === 'success') {
+                alert('删除成功！');
+                location.reload();
+            } else {
+                alert(result.error || '删除失败');
+            }
+        }).catch(()=>alert('网络错误'));
     }
     function hideDeletePlanModal() {
         document.getElementById('deletePlanModal').style.display = 'none';
@@ -485,6 +550,10 @@
     });
     // 添加喂食计划弹窗控制
     function showPlanModal() {
+        if ({{ 'false' if device.is_online else 'true' }}) {
+            alert('设备不在线，无法操作');
+            return;
+        }
         document.getElementById('addPlanModal').style.display = 'flex';
         document.getElementById('addPlanMsg').innerText = '';
         document.getElementById('addPlanForm').reset();
@@ -501,39 +570,80 @@
     function hideAddPlanModal() {
         document.getElementById('addPlanModal').style.display = 'none';
     }
-    document.getElementById('addPlanForm').onsubmit = async function(e) {
-        e.preventDefault();
-        const form = e.target;
-        const data = {
-            device_id: "{{ device.device_id }}",
-            day_of_week: form.day_of_week.value,
-            hour: form.hour.value,
-            minute: form.minute.value,
-            feeding_amount: form.feeding_amount.value
-        };
-        document.getElementById('addPlanMsg').innerText = '提交中...';
-        try {
-            const res = await fetch('/add_feeding_plan', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            });
-            const result = await res.json();
-            if (res.ok) {
-                document.getElementById('addPlanMsg').innerText = '添加成功！';
-                setTimeout(()=>{ location.reload(); }, 800);
+    // 修改添加喂食计划后等待设备确认逻辑，支持重试
+    function waitForPlanConfirmWithRetry(data, tryCount = 1) {
+        let retry = 0;
+        const maxRetry = 5; // 每次最多等5次（5秒）
+        const maxSend = 3; // 最多重发3次
+        const msgDiv = document.getElementById('addPlanMsg');
+        msgDiv.innerText = `等待设备确认...（第${tryCount}次）`;
+        function poll() {
+            fetch(`/get_feeding_plans?device_id=${data.device_id}`)
+                .then(res => res.json())
+                .then(resp => {
+                    if (resp.feeding_plans && resp.feeding_plans.some(p =>
+                        p.day_of_week == data.day_of_week &&
+                        p.hour == data.hour &&
+                        p.minute == data.minute &&
+                        p.feeding_amount == data.feeding_amount
+                    )) {
+                        msgDiv.innerText = '添加成功！';
+                        setTimeout(()=>{ location.reload(); }, 800);
+                    } else if (++retry < maxRetry) {
+                        setTimeout(poll, 1000);
+                    } else if (tryCount < maxSend) {
+                        // 超时重发
+                        msgDiv.innerText = `第${tryCount+1}次重发...`;
+                        sendPlanWithRetry(data, tryCount+1);
+                    } else {
+                        msgDiv.innerText = '下发失败，请检查设备连接';
+                    }
+                })
+                .catch(()=>{
+                    msgDiv.innerText = '网络错误';
+                });
+        }
+        poll();
+    }
+    function sendPlanWithRetry(data, tryCount) {
+        fetch('/add_feeding_plan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        }).then(res => res.json()).then(result => {
+            if (result.status === 'success') {
+                waitForPlanConfirmWithRetry(data, tryCount);
             } else {
                 document.getElementById('addPlanMsg').innerText = result.error || '添加失败';
             }
-        } catch(err) {
+        }).catch(()=>{
             document.getElementById('addPlanMsg').innerText = '网络错误';
-        }
-    };
+        });
+    }
+    if (document.getElementById('addPlanForm')) {
+        document.getElementById('addPlanForm').onsubmit = async function(e) {
+            e.preventDefault();
+            const form = e.target;
+            const data = {
+                device_id: "{{ device.device_id }}",
+                day_of_week: form.day_of_week.value,
+                hour: form.hour.value,
+                minute: form.minute.value,
+                feeding_amount: form.feeding_amount.value
+            };
+            document.getElementById('addPlanMsg').innerText = '提交中...';
+            sendPlanWithRetry(data, 1);
+        };
+    }
     document.getElementById('addPlanModal').onclick = function(e) {
         if(e.target === this) this.style.display = 'none';
     };
     // 手动喂食弹窗控制
     function showManualFeedModal() {
+        if ({{ 'false' if device.is_online else 'true' }}) {
+            alert('设备不在线，无法操作');
+            return;
+        }
         document.getElementById('manualFeedModal').style.display = 'flex';
         document.getElementById('manualFeedPopupMsg').innerText = '';
         document.getElementById('manualFeedPopupForm').reset();
@@ -546,33 +656,69 @@
     function hideManualFeedModal() {
         document.getElementById('manualFeedModal').style.display = 'none';
     }
-    document.getElementById('manualFeedPopupForm').onsubmit = async function(e) {
-        e.preventDefault();
-        const form = e.target;
-        const data = {
-            device_id: "{{ device.device_id }}",
-            hour: form.hour.value,
-            minute: form.minute.value,
-            feeding_amount: form.feeding_amount.value
-        };
-        document.getElementById('manualFeedPopupMsg').innerText = '提交中...';
-        try {
-            const res = await fetch('/manual_feeding', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            });
-            const result = await res.json();
-            if (res.ok) {
-                document.getElementById('manualFeedPopupMsg').innerText = '喂食成功！';
-                setTimeout(()=>{ location.reload(); }, 800);
+    // 手动喂食重试机制
+    function waitForManualConfirmWithRetry(data, tryCount = 1) {
+        let retry = 0;
+        const maxRetry = 5;
+        const maxSend = 3;
+        const msgDiv = document.getElementById('manualFeedPopupMsg');
+        msgDiv.innerText = `等待设备确认...（第${tryCount}次）`;
+        function poll() {
+            fetch(`/api/manual_feedings?device_id=${data.device_id}`)
+                .then(res => res.json())
+                .then(resp => {
+                    if (resp.manual_feedings && resp.manual_feedings.some(m =>
+                        m.hour == data.hour &&
+                        m.minute == data.minute &&
+                        m.feeding_amount == data.feeding_amount &&
+                        m.is_executed
+                    )) {
+                        msgDiv.innerText = '喂食成功！';
+                        setTimeout(()=>{ location.reload(); }, 800);
+                    } else if (++retry < maxRetry) {
+                        setTimeout(poll, 1000);
+                    } else if (tryCount < maxSend) {
+                        msgDiv.innerText = `第${tryCount+1}次重发...`;
+                        sendManualWithRetry(data, tryCount+1);
+                    } else {
+                        msgDiv.innerText = '下发失败，请检查设备连接';
+                    }
+                })
+                .catch(()=>{
+                    msgDiv.innerText = '网络错误';
+                });
+        }
+        poll();
+    }
+    function sendManualWithRetry(data, tryCount) {
+        fetch('/manual_feeding', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        }).then(res => res.json()).then(result => {
+            if (result.status === 'success') {
+                waitForManualConfirmWithRetry(data, tryCount);
             } else {
                 document.getElementById('manualFeedPopupMsg').innerText = result.error || '喂食失败';
             }
-        } catch(err) {
+        }).catch(()=>{
             document.getElementById('manualFeedPopupMsg').innerText = '网络错误';
-        }
-    };
+        });
+    }
+    if (document.getElementById('manualFeedPopupForm')) {
+        document.getElementById('manualFeedPopupForm').onsubmit = async function(e) {
+            e.preventDefault();
+            const form = e.target;
+            const data = {
+                device_id: "{{ device.device_id }}",
+                hour: form.hour.value,
+                minute: form.minute.value,
+                feeding_amount: form.feeding_amount.value
+            };
+            document.getElementById('manualFeedPopupMsg').innerText = '提交中...';
+            sendManualWithRetry(data, 1);
+        };
+    }
     document.getElementById('manualFeedModal').onclick = function(e) {
         if(e.target === this) this.style.display = 'none';
     };
@@ -611,6 +757,77 @@
             {% set _ = merged_manuals.__setitem__(key, m.feeding_amount) %}
         {% endif %}
     {% endfor %}
+    // 新增：手动喂食删除弹窗控制
+    let deleteManualId = null;
+    function confirmDeleteManual(id) {
+        deleteManualId = id;
+        document.getElementById('deletePlanModal').style.display = 'flex';
+        document.getElementById('deletePlanMsg').innerText = '';
+        // 修改弹窗内容
+        document.querySelector('#deletePlanModal h3').innerText = '确认删除';
+        document.querySelector('#deletePlanModal .modal-content > div').innerText = '确定要删除该手动喂食记录吗？';
+        // 修改按钮事件
+        document.getElementById('deletePlanBtn').onclick = async function() {
+            if (!deleteManualId) return;
+            document.getElementById('deletePlanMsg').innerText = '删除中...';
+            try {
+                const res = await fetch('/delete_manual_feeding', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({id: deleteManualId})
+                });
+                const result = await res.json();
+                if (res.ok) {
+                    document.getElementById('deletePlanMsg').innerText = '删除成功！';
+                    setTimeout(()=>{ location.reload(); }, 800);
+                } else {
+                    document.getElementById('deletePlanMsg').innerText = result.error || '删除失败';
+                }
+            } catch(err) {
+                document.getElementById('deletePlanMsg').innerText = '网络错误';
+            }
+        };
+    }
+    // 新增：合并手动喂食删除
+    function deleteMergedManual(key) {
+        if ({{ 'false' if device.is_online else 'true' }}) {
+            alert('设备不在线，无法操作');
+            return;
+        }
+        if (!confirm('确定要删除该时间点的所有待执行手动喂食吗？')) return;
+        fetch('/delete_manual_feeding', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ merged_key: key })
+        }).then(res => res.json()).then(result => {
+            if (result.status === 'success') {
+                alert('删除成功！');
+                location.reload();
+            } else {
+                alert(result.error || '删除失败');
+            }
+        }).catch(()=>alert('网络错误'));
+    }
+    // 只保留合并计划的批量删除逻辑
+    function deleteMergedPlan(key) {
+        if ({{ 'false' if device.is_online else 'true' }}) {
+            alert('设备不在线，无法操作');
+            return;
+        }
+        if (!confirm('确定要删除该时间点的所有喂食计划吗？')) return;
+        fetch('/delete_feeding_plan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ merged_key: key })
+        }).then(res => res.json()).then(result => {
+            if (result.status === 'success') {
+                alert('删除成功！');
+                location.reload();
+            } else {
+                alert(result.error || '删除失败');
+            }
+        }).catch(()=>alert('网络错误'));
+    }
     </script>
 </body>
 </html>

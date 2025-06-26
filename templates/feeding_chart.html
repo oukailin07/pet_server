@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>喂食记录图表</title>
+    <script src="/static/chart.js"></script>
+    <script>const device_id = "{{ device_id }}";</script>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f7f7f7; margin: 0; }
+        .container { max-width: 700px; margin: 40px auto; background: #fff; border-radius: 12px; box-shadow: 0 2px 12px #0001; padding: 32px; }
+        h2 { text-align: center; margin-bottom: 32px; }
+        #back-btn { margin-bottom: 24px; }
+        .period-bar { display:flex; gap:12px; justify-content:center; margin-bottom:18px; }
+        .period-btn { padding:6px 18px; border-radius:6px; border:none; background:#e0e7ef; color:#2563eb; font-weight:600; cursor:pointer; font-size:15px; }
+        .period-btn.active { background:#2563eb; color:#fff; }
+        .record-table { width:100%; border-collapse:collapse; margin-top:32px; background:#f8fafc; border-radius:8px; overflow:hidden; }
+        .record-table th, .record-table td { padding:8px 10px; border-bottom:1px solid #e5e7eb; text-align:center; }
+        .record-table th { background:#e0e7ef; color:#2563eb; font-weight:600; }
+        .record-table tr:last-child td { border-bottom:none; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <button id="back-btn" onclick="window.location.href='/'">返回主页</button>
+    <h2>喂食记录图表</h2>
+    <div class="period-bar">
+        <button class="period-btn active" data-period="24h">近24小时</button>
+        <button class="period-btn" data-period="week">一周</button>
+        <button class="period-btn" data-period="month">一个月</button>
+        <button class="period-btn" data-period="halfyear">半年</button>
+    </div>
+    <canvas id="feedingChart" width="600" height="320"></canvas>
+    <table class="record-table" id="recordTable">
+        <thead>
+            <tr><th>时间</th><th>分量 (g)</th><th>类型</th><th>状态</th></tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+</div>
+<script>
+let chart = null;
+const periodMap = {
+  '24h': {label:'近24小时', group:'hour'},
+  'week': {label:'一周', group:'date'},
+  'month': {label:'一个月', group:'date'},
+  'halfyear': {label:'半年', group:'date'}
+};
+function renderTable(records) {
+  const tbody = document.querySelector('#recordTable tbody');
+  tbody.innerHTML = '';
+  if (!records.length) {
+    tbody.innerHTML = '<tr><td colspan="4">暂无记录</td></tr>';
+    return;
+  }
+  records.slice().reverse().forEach(r => {
+    const type = r.type === 'manual' ? '手动' : '计划';
+    const status = r.status === 'success' || r.is_executed ? '成功' : (r.status||'');
+    const time = r.created_at;
+    const amount = r.actual_amount || r.feeding_amount;
+    tbody.innerHTML += `<tr><td>${time}</td><td>${amount}</td><td>${type}</td><td>${status}</td></tr>`;
+  });
+}
+function fetchAndDraw(period) {
+  fetch(`/api/feeding_records/${device_id}?period=${period}`)
+    .then(r => r.json())
+    .then(data => {
+      const records = data.records || [];
+      let labels = [], values = [];
+      if(period==='24h') {
+        labels = Array.from({length:24}, (_,i)=>i+':00');
+        values = Array(24).fill(0);
+        const now = new Date();
+        records.forEach(r => {
+          const t = new Date(r.created_at.replace(/-/g,'/'));
+          if((now-t)<24*3600*1000) values[t.getHours()] += r.actual_amount || r.feeding_amount;
+        });
+      } else {
+        let days = 7;
+        if(period==='month') days=30;
+        if(period==='halfyear') days=183;
+        const now = new Date();
+        let dateMap = {};
+        for(let i=days-1;i>=0;i--) {
+          const d = new Date(now.getTime()-i*24*3600*1000);
+          const ds = d.toISOString().slice(0,10);
+          dateMap[ds]=0;
+        }
+        records.forEach(r=>{
+          const t = new Date(r.created_at.replace(/-/g,'/'));
+          const ds = t.toISOString().slice(0,10);
+          if(ds in dateMap) dateMap[ds] += r.actual_amount || r.feeding_amount;
+        });
+        labels = Object.keys(dateMap);
+        values = Object.values(dateMap);
+      }
+      if(chart) chart.destroy();
+      const ctx = document.getElementById('feedingChart').getContext('2d');
+      chart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: '喂食量 (g)',
+            data: values,
+            backgroundColor: '#4fc3f7',
+            borderColor: '#0288d1',
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            y: { beginAtZero: true, title: { display: true, text: '喂食量 (g)' } },
+            x: { title: { display: true, text: period==='24h'?'小时':'日期' } }
+          }
+        }
+      });
+      renderTable(records);
+    });
+}
+document.querySelectorAll('.period-btn').forEach(btn=>{
+  btn.onclick = function() {
+    document.querySelectorAll('.period-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    fetchAndDraw(btn.getAttribute('data-period'));
+  };
+});
+fetchAndDraw('24h');
+</script>
+</body>
+</html> 
