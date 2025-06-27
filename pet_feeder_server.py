@@ -76,6 +76,7 @@ class FeedingPlan(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_confirmed = db.Column(db.Boolean, default=False)  # 新增：设备确认后为True
+    is_pending_delete = db.Column(db.Boolean, default=False)  # 新增：标记为待删除
 
 class ManualFeeding(db.Model):
     """手动喂食记录表"""
@@ -86,9 +87,11 @@ class ManualFeeding(db.Model):
     hour = db.Column(db.Integer, nullable=False)
     minute = db.Column(db.Integer, nullable=False)
     feeding_amount = db.Column(db.Float, nullable=False)
-    is_executed = db.Column(db.Boolean, default=False)
+    is_confirmed = db.Column(db.Boolean, default=False)  # 新增：设备确认收到指令
+    is_executed = db.Column(db.Boolean, default=False)   # 设备实际执行
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     executed_at = db.Column(db.DateTime, nullable=True)
+    is_pending_delete = db.Column(db.Boolean, default=False)  # 新增：标记为待删除
 
 class FeedingRecord(db.Model):
     """喂食记录表"""
@@ -218,8 +221,13 @@ def get_feeding_plans():
     device_id = request.args.get('device_id')
     if not device_id:
         return jsonify({"error": "device_id is required"}), 400
-    # 只返回已确认的计划
-    feeding_plans = FeedingPlan.query.filter_by(device_id=device_id, is_active=True, is_confirmed=True).all()
+    # 只返回已确认且未标记为待删除的计划
+    feeding_plans = FeedingPlan.query.filter_by(
+        device_id=device_id, 
+        is_active=True, 
+        is_confirmed=True,
+        is_pending_delete=False
+    ).all()
     feeding_plan_list = []
     for plan in feeding_plans:
         feeding_plan_list.append({
@@ -260,7 +268,20 @@ def manual_feeding():
         hour = int(hour)
         minute = int(minute)
         feeding_amount = float(feeding_amount)
-        # 创建手动喂食记录
+        # 检查是否已存在同一时间、同一分量、未执行的手动喂食
+        manual_feeding = ManualFeeding.query.filter_by(
+            device_id=device_id,
+            hour=hour,
+            minute=minute,
+            feeding_amount=feeding_amount,
+            is_executed=False
+        ).first()
+        if manual_feeding:
+            response = {"status": "success", "message": "Manual feeding already exists"}
+            print(f"手动喂食已存在: {device_id} {hour:02d}:{minute:02d} {feeding_amount}g")
+            # 不再推送WebSocket，避免设备端重复收到
+            return jsonify(response), 200
+        # 否则才新建并推送
         manual_feeding = ManualFeeding(
             device_id=device_id,
             hour=hour,
@@ -269,10 +290,7 @@ def manual_feeding():
         )
         db.session.add(manual_feeding)
         db.session.commit()
-        print(f"为设备 {device_id} 添加手动喂食: {hour:02d}:{minute:02d} {feeding_amount}g")
-        response = {"status": "success", "message": "Manual feeding added"}
-        print("手动喂食响应内容：", response)
-        # --- WebSocket下发 ---
+        # 只在新建时推送
         ws = connected_devices.get(device_id)
         if ws and ws_loop:
             try:
@@ -285,7 +303,7 @@ def manual_feeding():
                 print(f"WebSocket下发手动喂食失败: {e}")
         else:
             print(f"设备 {device_id} 未连接WebSocket，无法下发手动喂食")
-        return jsonify(response), 200
+        return jsonify({"status": "success", "message": "Manual feeding added"}), 200
     except Exception as e:
         print(f"添加手动喂食时出错: {e}")
         return jsonify({"error": str(e)}), 500
@@ -356,10 +374,18 @@ def index():
     beijing = pytz.timezone('Asia/Shanghai')
     last_seen_local = device.last_seen.replace(tzinfo=pytz.utc).astimezone(beijing) if device.last_seen else None
     last_grain_update_local = device.last_grain_update.replace(tzinfo=pytz.utc).astimezone(beijing) if device.last_grain_update else None
-    feeding_plans = FeedingPlan.query.filter_by(device_id=device_id, is_active=True).all()
-    manual_feedings = ManualFeeding.query.filter_by(device_id=device_id, is_executed=False).all()
-    recent_manual_feedings = ManualFeeding.query.filter_by(device_id=device_id).order_by(ManualFeeding.created_at.desc()).limit(10).all()
+    feeding_plans = FeedingPlan.query.filter_by(device_id=device_id, is_active=True, is_pending_delete=False).all()
+    manual_feedings = ManualFeeding.query.filter_by(device_id=device_id, is_executed=False, is_pending_delete=False).all()
+    recent_manual_feedings = ManualFeeding.query.filter_by(device_id=device_id, is_pending_delete=False).order_by(ManualFeeding.created_at.desc()).limit(10).all()
     recent_records = FeedingRecord.query.filter_by(device_id=device_id).order_by(FeedingRecord.created_at.desc()).limit(10).all()
+    
+    # 预处理时间，转换为北京时间
+    for record in recent_records:
+        record.created_at_local = record.created_at.replace(tzinfo=pytz.utc).astimezone(beijing)
+    for m in recent_manual_feedings:
+        if m.executed_at:
+            m.executed_at_local = m.executed_at.replace(tzinfo=pytz.utc).astimezone(beijing)
+    
     # 合并喂食计划
     merged_plans = {}
     for plan in feeding_plans:
@@ -368,8 +394,14 @@ def index():
     # 合并手动喂食
     merged_manuals = {}
     for m in recent_manual_feedings:
-        key = f"{m.hour}-{m.minute}-{1 if m.is_executed else 0}"
-        merged_manuals[key] = merged_manuals.get(key, 0) + m.feeding_amount
+        # 只有已确认但未执行的才显示在待执行列表中
+        if m.is_confirmed and not m.is_executed:
+            key = f"{m.hour}-{m.minute}-0"  # 0表示待执行
+            merged_manuals[key] = merged_manuals.get(key, 0) + m.feeding_amount
+        # 已执行的显示在已执行列表中
+        elif m.is_executed:
+            key = f"{m.hour}-{m.minute}-1"  # 1表示已执行
+            merged_manuals[key] = merged_manuals.get(key, 0) + m.feeding_amount
     return render_template('index.html', 
                          device=device, 
                          feeding_plans=feeding_plans,
@@ -443,7 +475,7 @@ def api_devices():
 @app.route('/api/feeding_plans/<device_id>')
 def api_feeding_plans(device_id):
     """API: 获取设备的喂食计划"""
-    plans = FeedingPlan.query.filter_by(device_id=device_id, is_active=True).all()
+    plans = FeedingPlan.query.filter_by(device_id=device_id, is_active=True, is_pending_delete=False).all()
     plan_list = []
     
     for plan in plans:
@@ -558,7 +590,15 @@ def delete_feeding_plan():
             day_of_week, hour, minute = map(int, merged_key.split('-'))
         except Exception:
             return jsonify({"error": "Invalid merged_key format"}), 400
-        plans = FeedingPlan.query.filter_by(day_of_week=day_of_week, hour=hour, minute=minute).all()
+        
+        # 查询未标记为待删除的计划
+        plans = FeedingPlan.query.filter_by(
+            day_of_week=day_of_week, 
+            hour=hour, 
+            minute=minute,
+            is_pending_delete=False
+        ).all()
+        
         if not plans:
             return jsonify({"error": "No matching plans found"}), 404
 
@@ -567,6 +607,11 @@ def delete_feeding_plan():
         for plan in plans:
             device_amounts.setdefault(plan.device_id, 0)
             device_amounts[plan.device_id] += plan.feeding_amount
+
+        # 标记为待删除，不直接删除
+        for plan in plans:
+            plan.is_pending_delete = True
+        db.session.commit()
 
         # 下发合并后的删除消息
         for device_id, total_amount in device_amounts.items():
@@ -590,45 +635,138 @@ def delete_feeding_plan():
             else:
                 print(f"设备 {device_id} 未连接WebSocket，无法下发删除喂食计划")
 
-        # 删除所有计划
-        for plan in plans:
-            db.session.delete(plan)
-        db.session.commit()
-        return jsonify({"status": "success", "message": "Feeding plans deleted"}), 200
+        return jsonify({"status": "success", "message": "Feeding plans marked for deletion"}), 200
 
     # 兼容原有单条删除
     plan_id = data.get('id')
     if not plan_id:
         return jsonify({"error": "Missing plan id"}), 400
-    plan = FeedingPlan.query.filter_by(id=plan_id).first()
+    
+    plan = FeedingPlan.query.filter_by(id=plan_id, is_pending_delete=False).first()
     if not plan:
         return jsonify({"error": "Feeding plan not found"}), 404
-    db.session.delete(plan)
+    
+    # 标记为待删除
+    plan.is_pending_delete = True
     db.session.commit()
-    return jsonify({"status": "success", "message": "Feeding plan deleted"}), 200
+    
+    # 推送删除消息到设备
+    ws = connected_devices.get(plan.device_id)
+    if ws and ws_loop:
+        try:
+            msg = {
+                "type": "delete_feeding_plan",
+                "day_of_week": plan.day_of_week,
+                "hour": plan.hour,
+                "minute": plan.minute,
+                "feeding_amount": plan.feeding_amount
+            }
+            asyncio.run_coroutine_threadsafe(
+                ws.send(json.dumps(msg)),
+                ws_loop
+            )
+            print(f"已通过WebSocket通知设备 {plan.device_id} 删除喂食计划: {msg}")
+        except Exception as e:
+            print(f"WebSocket下发删除喂食计划失败: {e}")
+    else:
+        print(f"设备 {plan.device_id} 未连接WebSocket，无法下发删除喂食计划")
+    
+    return jsonify({"status": "success", "message": "Feeding plan marked for deletion"}), 200
 
 @app.route('/delete_manual_feeding', methods=['POST'])
 def delete_manual_feeding():
     try:
+        # 增加日志，便于排查
+        print('收到删除手动喂食请求，headers:', dict(request.headers))
+        print('收到删除手动喂食请求，body:', request.get_data(as_text=True))
+        if not request.is_json:
+            return jsonify({"error": "Request must be JSON"}), 400
         data = request.get_json()
+        print('解析后的JSON:', data)
         if not data:
             return jsonify({"error": "Invalid JSON data"}), 400
+        
+        # 支持批量删除（merged_key格式）
+        merged_key = data.get('merged_key')
+        if merged_key:
+            try:
+                hour, minute, status = map(int, merged_key.split('-'))
+            except Exception:
+                return jsonify({"error": "Invalid merged_key format"}), 400
+            
+            # 查询未标记为待删除的手动喂食记录
+            manuals = ManualFeeding.query.filter_by(
+                hour=hour,
+                minute=minute,
+                is_pending_delete=False
+            ).all()
+            
+            if not manuals:
+                return jsonify({"error": "No matching manual feedings found"}), 404
+            
+            # 按设备分组
+            device_amounts = {}
+            for manual in manuals:
+                device_amounts.setdefault(manual.device_id, 0)
+                device_amounts[manual.device_id] += manual.feeding_amount
+            
+            # 标记为待删除
+            for manual in manuals:
+                manual.is_pending_delete = True
+            db.session.commit()
+            
+            # 下发删除消息到各设备
+            for device_id, total_amount in device_amounts.items():
+                ws = connected_devices.get(device_id)
+                if ws and ws_loop:
+                    try:
+                        msg = {
+                            "type": "delete_manual_feeding",
+                            "hour": hour,
+                            "minute": minute,
+                            "feeding_amount": total_amount
+                        }
+                        asyncio.run_coroutine_threadsafe(
+                            ws.send(json.dumps(msg)),
+                            ws_loop
+                        )
+                        print(f"已通过WebSocket通知设备 {device_id} 删除手动喂食: {msg}")
+                    except Exception as e:
+                        print(f"WebSocket下发删除手动喂食失败: {e}")
+                else:
+                    print(f"设备 {device_id} 未连接WebSocket，无法下发删除手动喂食")
+            
+            return jsonify({"status": "success", "message": "Manual feedings marked for deletion"}), 200
+        
+        # 兼容原有单条删除（id格式）
         manual_id = data.get('id')
         if not manual_id:
-            return jsonify({"error": "Missing manual id"}), 400
-        manual = ManualFeeding.query.filter_by(id=manual_id).first()
+            return jsonify({"error": "Missing manual id or merged_key"}), 400
+        
+        # 先查找是否已在删除中
+        manual_pending = ManualFeeding.query.filter_by(id=manual_id, is_pending_delete=True).first()
+        if manual_pending:
+            return jsonify({"error": "Manual feeding already pending delete"}), 409
+        
+        manual = ManualFeeding.query.filter_by(id=manual_id, is_pending_delete=False).first()
         if not manual:
             return jsonify({"error": "Manual feeding not found"}), 404
+        
         device_id = manual.device_id
+        
+        # 标记为待删除，不直接删除
+        manual.is_pending_delete = True
+        db.session.commit()
+        
         # 构造详细删除信息（不包含id）
         manual_info = {
             "hour": manual.hour,
             "minute": manual.minute,
             "feeding_amount": manual.feeding_amount
         }
-        db.session.delete(manual)
-        db.session.commit()
-        response = {"status": "success", "message": "Manual feeding deleted"}
+        
+        response = {"status": "success", "message": "Manual feeding marked for deletion"}
+        
         # --- WebSocket下发删除通知 ---
         ws = connected_devices.get(device_id)
         if ws and ws_loop:
@@ -643,8 +781,12 @@ def delete_manual_feeding():
                 print(f"WebSocket下发删除手动喂食失败: {e}")
         else:
             print(f"设备 {device_id} 未连接WebSocket，无法下发删除手动喂食")
+        
         return jsonify(response), 200
     except Exception as e:
+        import traceback
+        print('删除手动喂食异常:', e)
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/manual_feedings')
@@ -652,7 +794,7 @@ def api_manual_feedings():
     device_id = request.args.get('device_id')
     if not device_id:
         return jsonify({"error": "device_id is required"}), 400
-    manuals = ManualFeeding.query.filter_by(device_id=device_id).order_by(ManualFeeding.created_at.desc()).limit(20).all()
+    manuals = ManualFeeding.query.filter_by(device_id=device_id, is_pending_delete=False).order_by(ManualFeeding.created_at.desc()).limit(20).all()
     manual_list = []
     for m in manuals:
         manual_list.append({
@@ -752,31 +894,17 @@ async def ws_handler(websocket):
                             hour=msg_data.get('hour'),
                             minute=msg_data.get('minute'),
                             feeding_amount=msg_data.get('feeding_amount'),
+                            is_confirmed=False,
                             is_executed=False
                         ).order_by(ManualFeeding.created_at.asc()).first()
                         if manual:
-                            manual.is_executed = True
-                            manual.executed_at = datetime.utcfromtimestamp(msg_data.get('timestamp', datetime.utcnow().timestamp()))
+                            manual.is_confirmed = True
                             db.session.commit()
-                            print(f"设备确认手动喂食: {msg_data}")
-                elif msg_data.get('type') == 'feeding_record':
-                    # 保存到数据库
-                    with app.app_context():
-                        record = FeedingRecord(
-                            device_id=msg_data.get('device_id'),
-                            day_of_week=msg_data.get('day_of_week'),
-                            hour=msg_data.get('hour'),
-                            minute=msg_data.get('minute'),
-                            feeding_amount=msg_data.get('feeding_amount'),
-                            actual_amount=msg_data.get('feeding_amount'),
-                            status='success',
-                            created_at=datetime.utcfromtimestamp(msg_data.get('timestamp', datetime.utcnow().timestamp()))
-                        )
-                        db.session.add(record)
-                        db.session.commit()
-                        print(f"已保存喂食记录到数据库: {msg_data}")
+                            print(f"已标记手动喂食为待执行: {msg_data}")
+                        else:
+                            print(f"未找到待确认的手动喂食记录: {msg_data}")
                 elif msg_data.get('type') == 'manual_feeding':
-                    # 保存手动喂食到数据库（如有未执行的同时间同分量记录则只更新最早一条为已执行）
+                    # 设备实际执行了手动喂食，标记为已执行
                     with app.app_context():
                         manual = ManualFeeding.query.filter_by(
                             device_id=msg_data.get('device_id'),
@@ -789,20 +917,73 @@ async def ws_handler(websocket):
                             manual.is_executed = True
                             manual.executed_at = datetime.utcfromtimestamp(msg_data.get('timestamp', datetime.utcnow().timestamp()))
                             db.session.commit()
-                            print(f"已更新手动喂食为已执行: {msg_data}")
+                            print(f"设备已执行手动喂食: {msg_data}")
                         else:
-                            manual = ManualFeeding(
+                            print(f"未找到未执行的手动喂食记录: {msg_data}")
+                elif msg_data.get('type') == 'feeding_record':
+                    try:
+                        with app.app_context():
+                            import os
+                            print('数据库文件:', db.engine.url)
+                            db_path = db.engine.url.database
+                            if db_path:
+                                print('数据库绝对路径:', os.path.abspath(db_path))
+                            else:
+                                print('数据库路径为空')
+                            record = FeedingRecord(
                                 device_id=msg_data.get('device_id'),
-                                hour=msg_data.get('hour'),
-                                minute=msg_data.get('minute'),
-                                feeding_amount=msg_data.get('feeding_amount'),
-                                is_executed=True,
-                                executed_at=datetime.utcfromtimestamp(msg_data.get('timestamp', datetime.utcnow().timestamp())),
+                                day_of_week=int(msg_data.get('day_of_week')),
+                                hour=int(msg_data.get('hour')),
+                                minute=int(msg_data.get('minute')),
+                                feeding_amount=float(msg_data.get('feeding_amount')),
+                                actual_amount=float(msg_data.get('feeding_amount')),
+                                status='success',
                                 created_at=datetime.utcfromtimestamp(msg_data.get('timestamp', datetime.utcnow().timestamp()))
                             )
-                            db.session.add(manual)
+                            db.session.add(record)
                             db.session.commit()
-                            print(f"已保存手动喂食到数据库: {msg_data}")
+                            print(f"已保存喂食记录到数据库: {msg_data}")
+                            # 立即查询最新一条
+                            latest = FeedingRecord.query.filter_by(device_id=msg_data.get('device_id')).order_by(FeedingRecord.created_at.desc()).first()
+                            print('最新一条FeedingRecord:', latest.day_of_week, latest.hour, latest.minute, latest.feeding_amount, latest.created_at) if latest else print('未查到最新记录')
+                    except Exception as e:
+                        import traceback
+                        print(f"保存喂食记录时出错: {e}")
+                        traceback.print_exc()
+                # 设备端确认删除喂食计划
+                elif msg_data.get('type') == 'confirm_delete_feeding_plan':
+                    with app.app_context():
+                        plans = FeedingPlan.query.filter_by(
+                            device_id=msg_data.get('device_id'),
+                            day_of_week=msg_data.get('day_of_week'),
+                            hour=msg_data.get('hour'),
+                            minute=msg_data.get('minute'),
+                            feeding_amount=msg_data.get('feeding_amount'),
+                            is_pending_delete=True
+                        ).all()
+                        if plans:
+                            for plan in plans:
+                                db.session.delete(plan)
+                            db.session.commit()
+                            print(f"设备确认删除喂食计划，已从数据库删除: {msg_data}")
+                        else:
+                            print(f"未找到待删除的喂食计划: {msg_data}")
+                # 设备端确认删除手动喂食
+                elif msg_data.get('type') == 'confirm_delete_manual_feeding':
+                    with app.app_context():
+                        manual = ManualFeeding.query.filter_by(
+                            device_id=msg_data.get('device_id'),
+                            hour=msg_data.get('hour'),
+                            minute=msg_data.get('minute'),
+                            feeding_amount=msg_data.get('feeding_amount'),
+                            is_pending_delete=True
+                        ).order_by(ManualFeeding.created_at.asc()).first()
+                        if manual:
+                            db.session.delete(manual)
+                            db.session.commit()
+                            print(f"设备确认删除手动喂食，已从数据库删除: {msg_data}")
+                        else:
+                            print(f"未找到待删除的手动喂食记录: {msg_data}")
             except Exception as e:
                 print(f"处理设备消息时出错: {e}")
     except Exception as e:
@@ -876,6 +1057,45 @@ def fix_feeding_record_time():
             r.created_at = now
         db.session.commit()
         print(f'已将 {len(records)} 条 feeding_records 的 created_at 字段修正为 {now}')
+
+@app.cli.command('add_manual_confirmed_field')
+def add_manual_confirmed_field():
+    """为 manual_feedings 表添加 is_confirmed 字段"""
+    with app.app_context():
+        try:
+            # 添加 is_confirmed 字段
+            db.session.execute(text('ALTER TABLE manual_feedings ADD COLUMN is_confirmed BOOLEAN DEFAULT FALSE'))
+            db.session.commit()
+            print('已为 manual_feedings 表添加 is_confirmed 字段')
+            
+            # 将现有的已执行记录标记为已确认
+            ManualFeeding.query.filter_by(is_executed=True).update({'is_confirmed': True})
+            db.session.commit()
+            print('已将现有已执行的手动喂食记录标记为已确认')
+            
+        except Exception as e:
+            print(f'添加字段时出错: {e}')
+            db.session.rollback()
+
+@app.cli.command('add_pending_delete_fields')
+def add_pending_delete_fields():
+    """为 feeding_plans 和 manual_feedings 表添加 is_pending_delete 字段"""
+    with app.app_context():
+        try:
+            # 添加 feeding_plans 表的 is_pending_delete 字段
+            db.session.execute(text('ALTER TABLE feeding_plans ADD COLUMN is_pending_delete BOOLEAN DEFAULT FALSE'))
+            print('已为 feeding_plans 表添加 is_pending_delete 字段')
+            
+            # 添加 manual_feedings 表的 is_pending_delete 字段
+            db.session.execute(text('ALTER TABLE manual_feedings ADD COLUMN is_pending_delete BOOLEAN DEFAULT FALSE'))
+            print('已为 manual_feedings 表添加 is_pending_delete 字段')
+            
+            db.session.commit()
+            print('所有字段添加完成')
+            
+        except Exception as e:
+            print(f'添加字段时出错: {e}')
+            db.session.rollback()
 
 if __name__ == "__main__":
     import threading

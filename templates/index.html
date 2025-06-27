@@ -185,83 +185,186 @@
             top: 0;
             width: 100vw;
             height: 100vh;
-            background: rgba(0,0,0,0.35); /* 半透明遮罩 */
+            background: rgba(0,0,0,0.5);
             align-items: center;
             justify-content: center;
-            transition: opacity 0.2s;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(4px);
+        }
+        .modal.show {
+            opacity: 1;
         }
         .modal-content {
             background: #fff;
-            border-radius: 12px;
-            box-shadow: 0 4px 32px rgba(0,0,0,0.18);
-            padding: 32px 28px 24px 28px;
-            min-width: 320px;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+            padding: 0;
+            min-width: 400px;
             max-width: 90vw;
             position: relative;
-            z-index: 1001;
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-            animation: modalPopIn 0.18s cubic-bezier(.4,1.4,.6,1) 1;
+            transform: scale(0.9);
+            transition: all 0.3s ease;
+            overflow: hidden;
         }
-        @keyframes modalPopIn {
-            0% { transform: scale(0.92) translateY(40px); opacity: 0; }
-            100% { transform: scale(1) translateY(0); opacity: 1; }
-        }
-        .modal-actions {
-            display: flex;
-            gap: 18px;
-            justify-content: flex-end;
-            margin-top: 10px;
+        .modal.show .modal-content {
+            transform: scale(1);
         }
         .modal-content h3 {
-            margin: 0 0 10px 0;
+            margin: 0;
+            padding: 24px 32px 16px 32px;
             font-size: 20px;
-            color: #2563eb;
             font-weight: 600;
+            color: #1f2937;
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .modal-content h3::before {
+            content: '⚠️';
+            font-size: 24px;
+        }
+        /* 添加喂食计划弹框样式 */
+        .add-plan-modal .modal-content h3::before {
+            content: '📅';
+        }
+        /* 手动喂食弹框样式 */
+        .manual-feed-modal .modal-content h3::before {
+            content: '🍽️';
+        }
+        .modal-content > div:not(.modal-actions):not(.msg) {
+            padding: 24px 32px;
+            font-size: 16px;
+            color: #4b5563;
+            line-height: 1.6;
+            text-align: center;
+        }
+        .modal-content form {
+            padding: 24px 32px;
         }
         .modal-content label {
             display: block;
-            margin-bottom: 8px;
+            margin-bottom: 16px;
             font-size: 15px;
-            color: #333;
+            color: #374151;
+            font-weight: 500;
         }
         .modal-content input, .modal-content select {
             width: 100%;
-            padding: 7px 10px;
-            border: 1px solid #d1d5db;
-            border-radius: 5px;
+            padding: 12px 16px;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
             font-size: 15px;
-            margin-top: 4px;
-            margin-bottom: 10px;
+            margin-top: 6px;
+            transition: all 0.2s ease;
+            background: #f9fafb;
         }
-        .modal-content button {
-            padding: 7px 22px;
+        .modal-content input:focus, .modal-content select:focus {
+            outline: none;
+            border-color: #2563eb;
+            background: #fff;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+        .modal-content .add-plan-btn {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: #fff;
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }
+        .modal-content .add-plan-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(16, 185, 129, 0.4);
+        }
+        .modal-content .feed-btn {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            color: #fff;
+            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+        }
+        .modal-content .feed-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(245, 158, 11, 0.4);
+        }
+        .modal-actions {
+            padding: 0 32px 24px 32px;
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+        .modal-actions button {
+            padding: 12px 24px;
             border: none;
-            border-radius: 6px;
-            font-size: 15px;
+            border-radius: 8px;
+            font-size: 14px;
             font-weight: 500;
             cursor: pointer;
+            transition: all 0.2s ease;
+            min-width: 80px;
+        }
+        .modal-actions button:first-child {
+            background: #f3f4f6;
+            color: #6b7280;
+            border: 1px solid #d1d5db;
+        }
+        .modal-actions button:first-child:hover {
+            background: #e5e7eb;
+            color: #374151;
+        }
+        .modal-actions button:last-child {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
             color: #fff;
-            background: linear-gradient(90deg, #2563eb 0%, #6366f1 100%);
-            transition: background 0.2s;
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
         }
-        .modal-content button[type="button"] {
-            background: #e3e3e3;
-            color: #333;
+        .modal-actions button:last-child:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(239, 68, 68, 0.4);
         }
-        .modal-content button[type="button"]:hover {
-            background: #c7c7c7;
+        .modal-actions button:last-child:active {
+            transform: translateY(0);
         }
-        .modal-content button[type="submit"]:hover {
-            filter: brightness(1.08);
+        .msg {
+            padding: 0 32px 16px 32px;
+            text-align: center;
+            font-size: 14px;
+            font-weight: 500;
         }
-        .modal .msg {
-            margin-top: 8px;
-            text-align: left;
+        .msg.success {
+            color: #059669;
         }
+        .msg.error {
+            color: #dc2626;
+        }
+        .msg.loading {
+            color: #2563eb;
+        }
+        /* 删除确认弹框特殊样式 */
+        .delete-modal .modal-content {
+            border-top: 4px solid #ef4444;
+        }
+        .delete-modal .modal-content h3::before {
+            content: '🗑️';
+        }
+        /* 响应式设计 */
         @media (max-width: 600px) {
-            .modal-content { min-width: 90vw; padding: 18px 8vw 18px 8vw; }
+            .modal-content {
+                min-width: 90vw;
+                margin: 20px;
+            }
+            .modal-content h3 {
+                padding: 20px 24px 12px 24px;
+                font-size: 18px;
+            }
+            .modal-content > div:not(.modal-actions):not(.msg) {
+                padding: 20px 24px;
+                font-size: 15px;
+            }
+            .modal-actions {
+                padding: 0 24px 20px 24px;
+                flex-direction: column;
+            }
+            .modal-actions button {
+                width: 100%;
+                padding: 14px 24px;
+            }
         }
         .week-filter {
             display: flex;
@@ -382,20 +485,29 @@
                 <tr><th>小时</th><th>分钟</th><th>总分量 (g)</th><th>状态</th><th>操作</th></tr>
                 {% for key, total in merged_manuals.items() %}
                 {% set parts = key.split('-') %}
-                {% if parts[2] == '0' %} {# 只显示待执行 #}
                 <tr>
                     <td>{{ '%02d'|format(parts[0]|int) }}</td>
                     <td>{{ '%02d'|format(parts[1]|int) }}</td>
                     <td>{{ total }}</td>
-                    <td>待执行</td>
                     <td>
+                        {% if parts[2] == '1' %}
+                            已执行
+                        {% else %}
+                            待执行
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if parts[2] == '0' %}
                         <button onclick="deleteMergedManual('{{ key }}')" {% if not device.is_online %}disabled style="opacity:0.5;cursor:not-allowed;"{% endif %} style="color:#e53935;">删除</button>
+                        {% else %}
+                        -
+                        {% endif %}
                     </td>
                 </tr>
-                {% endif %}
-                {% else %}
-                <tr><td colspan="5">暂无手动喂食记录</td></tr>
                 {% endfor %}
+                {% if not merged_manuals %}
+                <tr><td colspan="5">暂无手动喂食记录</td></tr>
+                {% endif %}
             </table>
         </div>
         <div class="card-section">
@@ -411,7 +523,7 @@
                     <td>{{ record.feeding_amount }}</td>
                     <td>{{ record.actual_amount }}</td>
                     <td>{{ record.status }}</td>
-                    <td>{{ record.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                    <td>{{ record.created_at_local.strftime('%Y-%m-%d %H:%M:%S') }}</td>
                 </tr>
                 {% endfor %}
                 {% for m in recent_manual_feedings %}
@@ -424,16 +536,19 @@
                     <td>{{ m.feeding_amount }}</td>
                     <td>{{ m.feeding_amount }}</td>
                     <td>已执行</td>
-                    <td>{{ m.executed_at.strftime('%Y-%m-%d %H:%M:%S') if m.executed_at else '-' }}</td>
+                    <td>{{ m.executed_at_local.strftime('%Y-%m-%d %H:%M:%S') if m.executed_at_local else '-' }}</td>
                 </tr>
                 {% endif %}
-                {% else %}
-                <tr><td colspan="8">暂无喂食记录</td></tr>
                 {% endfor %}
+                {% if not recent_records and not recent_manual_feedings %}
+                <tr><td colspan="8">暂无喂食记录</td></tr>
+                {% elif recent_records|length == 0 and recent_manual_feedings|selectattr('is_executed')|list|length == 0 %}
+                <tr><td colspan="8">暂无喂食记录</td></tr>
+                {% endif %}
             </table>
         </div>
         <!-- 添加喂食计划弹窗 -->
-        <div class="modal" id="addPlanModal">
+        <div class="modal add-plan-modal" id="addPlanModal">
             <div class="modal-content">
                 <h3>添加喂食计划</h3>
                 <form id="addPlanForm" onsubmit="return false;">
@@ -466,7 +581,7 @@
             </div>
         </div>
         <!-- 手动喂食弹窗 -->
-        <div class="modal" id="manualFeedModal">
+        <div class="modal manual-feed-modal" id="manualFeedModal">
             <div class="modal-content">
                 <h3>手动喂食</h3>
                 <form id="manualFeedPopupForm" onsubmit="return false;">
@@ -488,13 +603,13 @@
             </div>
         </div>
         <!-- 删除确认弹窗 -->
-        <div class="modal" id="deletePlanModal">
+        <div class="modal delete-modal" id="deletePlanModal">
             <div class="modal-content">
                 <h3>确认删除</h3>
                 <div>确定要删除该喂食计划吗？</div>
                 <div class="modal-actions">
                     <button type="button" onclick="hideDeletePlanModal()">取消</button>
-                    <button type="button" id="deletePlanBtn" style="background:#e53935; color:#fff;">删除</button>
+                    <button type="button" id="deletePlanBtn">删除</button>
                 </div>
                 <div id="deletePlanMsg" class="msg"></div>
             </div>
@@ -520,11 +635,16 @@
         }).catch(()=>alert('网络错误'));
     }
     function hideDeletePlanModal() {
-        document.getElementById('deletePlanModal').style.display = 'none';
+        const modal = document.getElementById('deletePlanModal');
+        modal.classList.remove('show');
+        setTimeout(() => {
+            modal.style.display = 'none';
+        }, 300);
     }
     document.getElementById('deletePlanBtn').onclick = async function() {
         if (!deletePlanId) return;
         document.getElementById('deletePlanMsg').innerText = '删除中...';
+        document.getElementById('deletePlanMsg').className = 'msg loading';
         try {
             const res = await fetch('/delete_feeding_plan', {
                 method: 'POST',
@@ -534,18 +654,26 @@
             const result = await res.json();
             if (res.ok) {
                 document.getElementById('deletePlanMsg').innerText = '删除成功！';
+                document.getElementById('deletePlanMsg').className = 'msg success';
                 setTimeout(()=>{ location.reload(); }, 800);
             } else {
                 document.getElementById('deletePlanMsg').innerText = result.error || '删除失败';
+                document.getElementById('deletePlanMsg').className = 'msg error';
             }
         } catch(err) {
             document.getElementById('deletePlanMsg').innerText = '网络错误';
+            document.getElementById('deletePlanMsg').className = 'msg error';
         }
     };
     // 点击弹窗外关闭
     ['deletePlanModal'].forEach(id=>{
         document.getElementById(id).onclick = function(e) {
-            if(e.target === this) this.style.display = 'none';
+            if(e.target === this) {
+                this.classList.remove('show');
+                setTimeout(() => {
+                    this.style.display = 'none';
+                }, 300);
+            }
         };
     });
     // 添加喂食计划弹窗控制
@@ -554,7 +682,11 @@
             alert('设备不在线，无法操作');
             return;
         }
-        document.getElementById('addPlanModal').style.display = 'flex';
+        const modal = document.getElementById('addPlanModal');
+        modal.style.display = 'flex';
+        setTimeout(() => {
+            modal.classList.add('show');
+        }, 10);
         document.getElementById('addPlanMsg').innerText = '';
         document.getElementById('addPlanForm').reset();
         // 设置默认值：当前时间，分量50，星期
@@ -568,7 +700,11 @@
         document.querySelector('#addPlanForm [name="day_of_week"]').value = planDay;
     }
     function hideAddPlanModal() {
-        document.getElementById('addPlanModal').style.display = 'none';
+        const modal = document.getElementById('addPlanModal');
+        modal.classList.remove('show');
+        setTimeout(() => {
+            modal.style.display = 'none';
+        }, 300);
     }
     // 修改添加喂食计划后等待设备确认逻辑，支持重试
     function waitForPlanConfirmWithRetry(data, tryCount = 1) {
@@ -636,7 +772,12 @@
         };
     }
     document.getElementById('addPlanModal').onclick = function(e) {
-        if(e.target === this) this.style.display = 'none';
+        if(e.target === this) {
+            this.classList.remove('show');
+            setTimeout(() => {
+                this.style.display = 'none';
+            }, 300);
+        }
     };
     // 手动喂食弹窗控制
     function showManualFeedModal() {
@@ -644,7 +785,11 @@
             alert('设备不在线，无法操作');
             return;
         }
-        document.getElementById('manualFeedModal').style.display = 'flex';
+        const modal = document.getElementById('manualFeedModal');
+        modal.style.display = 'flex';
+        setTimeout(() => {
+            modal.classList.add('show');
+        }, 10);
         document.getElementById('manualFeedPopupMsg').innerText = '';
         document.getElementById('manualFeedPopupForm').reset();
         // 设置默认值：当前时间，分量50
@@ -654,7 +799,11 @@
         document.querySelector('#manualFeedPopupForm [name="feeding_amount"]').value = 50;
     }
     function hideManualFeedModal() {
-        document.getElementById('manualFeedModal').style.display = 'none';
+        const modal = document.getElementById('manualFeedModal');
+        modal.classList.remove('show');
+        setTimeout(() => {
+            modal.style.display = 'none';
+        }, 300);
     }
     // 手动喂食重试机制
     function waitForManualConfirmWithRetry(data, tryCount = 1) {
@@ -667,13 +816,14 @@
             fetch(`/api/manual_feedings?device_id=${data.device_id}`)
                 .then(res => res.json())
                 .then(resp => {
-                    if (resp.manual_feedings && resp.manual_feedings.some(m =>
+                    // 找到对应记录
+                    const m = resp.manual_feedings && resp.manual_feedings.find(m =>
                         m.hour == data.hour &&
                         m.minute == data.minute &&
-                        m.feeding_amount == data.feeding_amount &&
-                        m.is_executed
-                    )) {
-                        msgDiv.innerText = '喂食成功！';
+                        m.feeding_amount == data.feeding_amount
+                    );
+                    if (m && m.is_confirmed) {
+                        msgDiv.innerText = m.is_executed ? '喂食成功！' : '下发成功，等待设备执行...';
                         setTimeout(()=>{ location.reload(); }, 800);
                     } else if (++retry < maxRetry) {
                         setTimeout(poll, 1000);
@@ -697,7 +847,8 @@
             body: JSON.stringify(data)
         }).then(res => res.json()).then(result => {
             if (result.status === 'success') {
-                waitForManualConfirmWithRetry(data, tryCount);
+                document.getElementById('manualFeedPopupMsg').innerText = '下发成功，等待设备执行...';
+                setTimeout(()=>{ location.reload(); }, 800);
             } else {
                 document.getElementById('manualFeedPopupMsg').innerText = result.error || '喂食失败';
             }
@@ -720,7 +871,12 @@
         };
     }
     document.getElementById('manualFeedModal').onclick = function(e) {
-        if(e.target === this) this.style.display = 'none';
+        if(e.target === this) {
+            this.classList.remove('show');
+            setTimeout(() => {
+                this.style.display = 'none';
+            }, 300);
+        }
     };
     // 喂食计划星期筛选
     document.querySelectorAll('.week-btn').forEach(btn => {
@@ -737,96 +893,96 @@
             });
         };
     });
-    // 合并喂食计划
-    {% set merged_plans = {} %}
-    {% for plan in feeding_plans %}
-        {% set key = plan.day_of_week ~ '-' ~ plan.hour ~ '-' ~ plan.minute %}
-        {% if key in merged_plans %}
-            {% set _ = merged_plans.__setitem__(key, merged_plans[key] + plan.feeding_amount) %}
-        {% else %}
-            {% set _ = merged_plans.__setitem__(key, plan.feeding_amount) %}
-        {% endif %}
-    {% endfor %}
-    // 合并手动喂食
-    {% set merged_manuals = {} %}
-    {% for m in recent_manual_feedings %}
-        {% set key = m.hour ~ '-' ~ m.minute ~ '-' ~ (m.is_executed and '1' or '0') %}
-        {% if key in merged_manuals %}
-            {% set _ = merged_manuals.__setitem__(key, merged_manuals[key] + m.feeding_amount) %}
-        {% else %}
-            {% set _ = merged_manuals.__setitem__(key, m.feeding_amount) %}
-        {% endif %}
-    {% endfor %}
-    // 新增：手动喂食删除弹窗控制
-    let deleteManualId = null;
-    function confirmDeleteManual(id) {
-        deleteManualId = id;
-        document.getElementById('deletePlanModal').style.display = 'flex';
+    // 合并喂食计划数据
+    const mergedPlansData = {{ merged_plans|tojson }};
+    const mergedManualsData = {{ merged_manuals|tojson }};
+    
+    // 新增：批量删除喂食计划弹窗控制
+    let deleteMergedKey = null;
+    function confirmDeleteMergedPlan(key) {
+        deleteMergedKey = key;
+        const modal = document.getElementById('deletePlanModal');
+        modal.style.display = 'flex';
+        setTimeout(() => { modal.classList.add('show'); }, 10);
         document.getElementById('deletePlanMsg').innerText = '';
-        // 修改弹窗内容
-        document.querySelector('#deletePlanModal h3').innerText = '确认删除';
-        document.querySelector('#deletePlanModal .modal-content > div').innerText = '确定要删除该手动喂食记录吗？';
-        // 修改按钮事件
+        document.getElementById('deletePlanMsg').className = 'msg';
+        document.querySelector('#deletePlanModal h3').innerText = '批量删除';
+        document.querySelector('#deletePlanModal .modal-content > div').innerText = '确定要删除该时间点的所有喂食计划吗？';
         document.getElementById('deletePlanBtn').onclick = async function() {
-            if (!deleteManualId) return;
+            if (!deleteMergedKey) return;
             document.getElementById('deletePlanMsg').innerText = '删除中...';
+            document.getElementById('deletePlanMsg').className = 'msg loading';
             try {
-                const res = await fetch('/delete_manual_feeding', {
+                const res = await fetch('/delete_feeding_plan', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({id: deleteManualId})
+                    body: JSON.stringify({ merged_key: deleteMergedKey })
                 });
                 const result = await res.json();
                 if (res.ok) {
                     document.getElementById('deletePlanMsg').innerText = '删除成功！';
+                    document.getElementById('deletePlanMsg').className = 'msg success';
                     setTimeout(()=>{ location.reload(); }, 800);
                 } else {
                     document.getElementById('deletePlanMsg').innerText = result.error || '删除失败';
+                    document.getElementById('deletePlanMsg').className = 'msg error';
                 }
             } catch(err) {
                 document.getElementById('deletePlanMsg').innerText = '网络错误';
+                document.getElementById('deletePlanMsg').className = 'msg error';
             }
         };
     }
-    // 新增：合并手动喂食删除
-    function deleteMergedManual(key) {
-        if ({{ 'false' if device.is_online else 'true' }}) {
-            alert('设备不在线，无法操作');
-            return;
-        }
-        if (!confirm('确定要删除该时间点的所有待执行手动喂食吗？')) return;
-        fetch('/delete_manual_feeding', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ merged_key: key })
-        }).then(res => res.json()).then(result => {
-            if (result.status === 'success') {
-                alert('删除成功！');
-                location.reload();
-            } else {
-                alert(result.error || '删除失败');
+    // 新增：批量删除手动喂食弹窗控制
+    let deleteMergedManualKey = null;
+    function confirmDeleteMergedManual(key) {
+        deleteMergedManualKey = key;
+        const modal = document.getElementById('deletePlanModal');
+        modal.style.display = 'flex';
+        setTimeout(() => { modal.classList.add('show'); }, 10);
+        document.getElementById('deletePlanMsg').innerText = '';
+        document.getElementById('deletePlanMsg').className = 'msg';
+        document.querySelector('#deletePlanModal h3').innerText = '批量删除';
+        document.querySelector('#deletePlanModal .modal-content > div').innerText = '确定要删除该时间点的所有待执行手动喂食吗？';
+        document.getElementById('deletePlanBtn').onclick = async function() {
+            if (!deleteMergedManualKey) return;
+            document.getElementById('deletePlanMsg').innerText = '删除中...';
+            document.getElementById('deletePlanMsg').className = 'msg loading';
+            try {
+                const res = await fetch('/delete_manual_feeding', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ merged_key: deleteMergedManualKey })
+                });
+                const result = await res.json();
+                if (res.ok) {
+                    document.getElementById('deletePlanMsg').innerText = '删除成功！';
+                    document.getElementById('deletePlanMsg').className = 'msg success';
+                    setTimeout(()=>{ location.reload(); }, 800);
+                } else {
+                    document.getElementById('deletePlanMsg').innerText = result.error || '删除失败';
+                    document.getElementById('deletePlanMsg').className = 'msg error';
+                }
+            } catch(err) {
+                document.getElementById('deletePlanMsg').innerText = '网络错误';
+                document.getElementById('deletePlanMsg').className = 'msg error';
             }
-        }).catch(()=>alert('网络错误'));
+        };
     }
-    // 只保留合并计划的批量删除逻辑
+    // 替换原有批量删除调用
     function deleteMergedPlan(key) {
         if ({{ 'false' if device.is_online else 'true' }}) {
             alert('设备不在线，无法操作');
             return;
         }
-        if (!confirm('确定要删除该时间点的所有喂食计划吗？')) return;
-        fetch('/delete_feeding_plan', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ merged_key: key })
-        }).then(res => res.json()).then(result => {
-            if (result.status === 'success') {
-                alert('删除成功！');
-                location.reload();
-            } else {
-                alert(result.error || '删除失败');
-            }
-        }).catch(()=>alert('网络错误'));
+        confirmDeleteMergedPlan(key);
+    }
+    function deleteMergedManual(key) {
+        if ({{ 'false' if device.is_online else 'true' }}) {
+            alert('设备不在线，无法操作');
+            return;
+        }
+        confirmDeleteMergedManual(key);
     }
     </script>
 </body>

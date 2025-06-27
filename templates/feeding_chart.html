@@ -3,39 +3,164 @@
 <head>
     <meta charset="UTF-8">
     <title>喂食记录图表</title>
-    <script src="/static/chart.js"></script>
-    <script>const device_id = "{{ device_id }}";</script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/timezone.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1/plugin/utc.js"></script>
+    <script>
+      dayjs.extend(dayjs_plugin_utc);
+      dayjs.extend(dayjs_plugin_timezone);
+      const BEIJING_TZ = 'Asia/Shanghai';
+      const device_id = "{{ device_id }}";
+    </script>
     <style>
-        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f7f7f7; margin: 0; }
-        .container { max-width: 700px; margin: 40px auto; background: #fff; border-radius: 12px; box-shadow: 0 2px 12px #0001; padding: 32px; }
-        h2 { text-align: center; margin-bottom: 32px; }
-        #back-btn { margin-bottom: 24px; }
-        .period-bar { display:flex; gap:12px; justify-content:center; margin-bottom:18px; }
-        .period-btn { padding:6px 18px; border-radius:6px; border:none; background:#e0e7ef; color:#2563eb; font-weight:600; cursor:pointer; font-size:15px; }
-        .period-btn.active { background:#2563eb; color:#fff; }
-        .record-table { width:100%; border-collapse:collapse; margin-top:32px; background:#f8fafc; border-radius:8px; overflow:hidden; }
-        .record-table th, .record-table td { padding:8px 10px; border-bottom:1px solid #e5e7eb; text-align:center; }
-        .record-table th { background:#e0e7ef; color:#2563eb; font-weight:600; }
+        body { margin: 0; padding: 0; background: #f7f9fb; font-family: 'Segoe UI', Arial, sans-serif; }
+        .navbar {
+            background: #2563eb;
+            color: #fff;
+            padding: 0 32px;
+            height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 8px rgba(37,99,235,0.08);
+        }
+        .navbar .logo {
+            font-size: 22px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+        }
+        .navbar .logo::before {
+            content: '📊';
+            font-size: 22px;
+            margin-right: 8px;
+        }
+        .navbar .nav-right {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+        }
+        .navbar .back-btn {
+            color: #fff;
+            text-decoration: none;
+            font-size: 15px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0;
+            opacity: 0.85;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .navbar .back-btn:hover {
+            text-decoration: underline;
+            opacity: 1;
+        }
+        .container {
+            max-width: 900px;
+            margin: 36px auto 0 auto;
+            padding: 0 16px;
+        }
+        .chart-card {
+            background: #fff;
+            border-radius: 16px;
+            box-shadow: 0 2px 12px rgba(60, 120, 200, 0.08);
+            padding: 32px 28px 24px 28px;
+            margin-bottom: 28px;
+        }
+        h2 { text-align: center; margin-bottom: 32px; color: #2563eb; font-size: 24px; }
+        .period-bar { display:flex; gap:14px; justify-content:center; margin-bottom:18px; }
+        .period-btn {
+            padding:10px 28px;
+            border-radius:24px;
+            border:none;
+            background:linear-gradient(90deg,#e0e7ef 0%,#f1f5f9 100%);
+            color:#2563eb;
+            font-weight:600;
+            cursor:pointer;
+            font-size:16px;
+            transition:all 0.18s;
+            box-shadow:0 1px 4px #2563eb11;
+        }
+        .period-btn.active {
+            background:linear-gradient(90deg,#2563eb 0%,#6366f1 100%);
+            color:#fff;
+            box-shadow:0 2px 8px #2563eb22;
+        }
+        .period-btn:hover { filter:brightness(1.08); }
+        .chart-wrap { display:flex; justify-content:center; align-items:center; margin-bottom: 18px; }
+        #feedingChart { background: #f8fafc; border-radius: 12px; box-shadow: 0 1px 6px #2563eb11; }
+        .record-table {
+            width:100%;
+            border-collapse:collapse;
+            margin-top:18px;
+            background:#f8fafc;
+            border-radius:12px;
+            overflow:hidden;
+            box-shadow: 0 1px 6px #2563eb11;
+        }
+        .record-table th, .record-table td {
+            padding:10px 12px;
+            border-bottom:1px solid #e5e7eb;
+            text-align:center;
+            font-size:15px;
+        }
+        .record-table th {
+            background:#e0e7ef;
+            color:#2563eb;
+            font-weight:600;
+        }
         .record-table tr:last-child td { border-bottom:none; }
+        .record-table tbody tr:hover { background: #e3f2fd; }
+        .record-table td {
+            color: #374151;
+        }
+        .record-table .empty-row td {
+            color: #b0b4bb;
+            font-style: italic;
+            background: #f3f4f6;
+        }
+        @media (max-width: 700px) {
+            .container { padding: 0 2vw; }
+            .chart-card { padding: 18px 4vw 18px 4vw; }
+            #feedingChart { width: 100% !important; height: auto !important; }
+        }
+        @media (max-width: 500px) {
+            .chart-card { padding: 10px 2vw 10px 2vw; }
+            .period-btn { padding: 8px 10px; font-size: 14px; }
+        }
     </style>
 </head>
 <body>
-<div class="container">
-    <button id="back-btn" onclick="window.location.href='/'">返回主页</button>
-    <h2>喂食记录图表</h2>
-    <div class="period-bar">
-        <button class="period-btn active" data-period="24h">近24小时</button>
-        <button class="period-btn" data-period="week">一周</button>
-        <button class="period-btn" data-period="month">一个月</button>
-        <button class="period-btn" data-period="halfyear">半年</button>
+<div class="navbar">
+    <div class="logo">喂食记录图表</div>
+    <div class="nav-right">
+        <button class="back-btn" onclick="window.location.href='/'">
+            <span style="font-size:18px;">←</span> 返回主页
+        </button>
     </div>
-    <canvas id="feedingChart" width="600" height="320"></canvas>
-    <table class="record-table" id="recordTable">
-        <thead>
-            <tr><th>时间</th><th>分量 (g)</th><th>类型</th><th>状态</th></tr>
-        </thead>
-        <tbody></tbody>
-    </table>
+</div>
+<div class="container">
+    <div class="chart-card">
+        <div class="period-bar">
+            <button class="period-btn active" data-period="24h">近24小时</button>
+            <button class="period-btn" data-period="week">一周</button>
+            <button class="period-btn" data-period="month">一个月</button>
+            <button class="period-btn" data-period="halfyear">半年</button>
+        </div>
+        <div class="chart-wrap">
+            <canvas id="feedingChart" width="600" height="320"></canvas>
+        </div>
+        <table class="record-table" id="recordTable">
+            <thead>
+                <tr><th>时间</th><th>分量 (g)</th><th>类型</th><th>状态</th></tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
 </div>
 <script>
 let chart = null;
@@ -49,13 +174,13 @@ function renderTable(records) {
   const tbody = document.querySelector('#recordTable tbody');
   tbody.innerHTML = '';
   if (!records.length) {
-    tbody.innerHTML = '<tr><td colspan="4">暂无记录</td></tr>';
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="4">暂无记录</td></tr>';
     return;
   }
   records.slice().reverse().forEach(r => {
     const type = r.type === 'manual' ? '手动' : '计划';
     const status = r.status === 'success' || r.is_executed ? '成功' : (r.status||'');
-    const time = r.created_at;
+    const time = dayjs.utc(r.created_at).tz(BEIJING_TZ).format('YYYY/MM/DD HH:mm:ss');
     const amount = r.actual_amount || r.feeding_amount;
     tbody.innerHTML += `<tr><td>${time}</td><td>${amount}</td><td>${type}</td><td>${status}</td></tr>`;
   });
@@ -69,25 +194,25 @@ function fetchAndDraw(period) {
       if(period==='24h') {
         labels = Array.from({length:24}, (_,i)=>i+':00');
         values = Array(24).fill(0);
-        const now = new Date();
+        const now = dayjs().tz(BEIJING_TZ);
         records.forEach(r => {
-          const t = new Date(r.created_at.replace(/-/g,'/'));
-          if((now-t)<24*3600*1000) values[t.getHours()] += r.actual_amount || r.feeding_amount;
+          const t = dayjs.utc(r.created_at).tz(BEIJING_TZ);
+          if(now.diff(t, 'hour') < 24) values[t.hour()] += r.actual_amount || r.feeding_amount;
         });
       } else {
         let days = 7;
         if(period==='month') days=30;
         if(period==='halfyear') days=183;
-        const now = new Date();
+        const now = dayjs().tz(BEIJING_TZ);
         let dateMap = {};
         for(let i=days-1;i>=0;i--) {
-          const d = new Date(now.getTime()-i*24*3600*1000);
-          const ds = d.toISOString().slice(0,10);
+          const d = now.subtract(i, 'day');
+          const ds = d.format('YYYY-MM-DD');
           dateMap[ds]=0;
         }
         records.forEach(r=>{
-          const t = new Date(r.created_at.replace(/-/g,'/'));
-          const ds = t.toISOString().slice(0,10);
+          const t = dayjs.utc(r.created_at).tz(BEIJING_TZ);
+          const ds = t.format('YYYY-MM-DD');
           if(ds in dateMap) dateMap[ds] += r.actual_amount || r.feeding_amount;
         });
         labels = Object.keys(dateMap);
@@ -102,6 +227,7 @@ function fetchAndDraw(period) {
           datasets: [{
             label: '喂食量 (g)',
             data: values,
+            backgroundColor: 'linear-gradient(90deg,#4fc3f7 0%,#2563eb 100%)',
             backgroundColor: '#4fc3f7',
             borderColor: '#0288d1',
             borderWidth: 1
