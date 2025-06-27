@@ -456,7 +456,7 @@
         <div class="actions-bar">
             <button onclick="showPlanModal()" id="addPlanBtn" {% if not device.is_online %}disabled style="opacity:0.5;cursor:not-allowed;"{% endif %}>➕ 添加喂食计划</button>
             <button onclick="showManualFeedModal()" id="manualFeedBtn" {% if not device.is_online %}disabled style="opacity:0.5;cursor:not-allowed;"{% endif %}>🤲 手动喂食</button>
-            <button onclick="location.reload()">🔄 刷新数据</button>
+            <button id="syncBtn" {% if not device.is_online %}disabled style="opacity:0.5;cursor:not-allowed;"{% endif %}>🔄 数据同步</button>
             <a class="export-btn" href="/export_feeding_records/{{ device.device_id }}">⬇️ 导出数据</a>
         </div>
         <div class="card-section">
@@ -616,6 +616,101 @@
         </div>
     </div>
     <script>
+    // 调试：页面刷新/跳转和WebSocket断开提示
+    window.addEventListener('beforeunload', function() {
+        alert('页面即将刷新或跳转！');
+    });
+    function setWsOnCloseDebug() {
+        if (window.ws) {
+            window.ws.onclose = function(e) {
+                alert('WebSocket断开！');
+                console.log('WebSocket断开，原因：', e);
+            };
+        }
+    }
+    window.addEventListener('load', setWsOnCloseDebug);
+    
+    // 全局同步状态控制
+    let wsSyncing = false;
+    
+    // 安全的页面刷新函数
+    function safeReload(delay = 0) {
+        if (wsSyncing) {
+            console.log('同步中，禁止页面刷新');
+            return;
+        }
+        if (delay > 0) {
+            setTimeout(() => location.reload(), delay);
+        } else {
+            location.reload();
+        }
+    }
+    
+    // 只在页面加载时new一次WebSocket
+    if (!window.ws) {
+        const wsUrl = 'ws://' + location.hostname + ':8765';
+        window.ws = new WebSocket(wsUrl);
+        window.ws.onopen = function() {
+            console.log('WS已连接，状态:', window.ws.readyState);
+        };
+        window.ws.onmessage = function(e) {
+            console.log('收到WebSocket消息:', e.data);
+            try {
+                const msg = JSON.parse(e.data);
+                handleSyncResult(msg);
+                if (msg.type === 'sync_request_sent') {
+                    console.log('同步请求已发送到设备');
+                } else if (msg.type === 'sync_request_failed') {
+                    console.log('同步请求失败:', msg.error);
+                    wsSyncing = false;
+                    syncBtn.innerText = '🔄 数据同步';
+                    syncBtn.disabled = false;
+                    alert('同步失败: ' + msg.error);
+                }
+            } catch(err) {
+                console.log('解析消息失败:', err);
+            }
+        };
+        window.ws.onerror = function(e) {
+            console.log('WS错误:', e);
+        };
+        setWsOnCloseDebug(); // 调试断开
+    }
+    // 数据同步按钮逻辑
+    const syncBtn = document.getElementById('syncBtn');
+    syncBtn.onclick = function() {
+        if (wsSyncing) return;
+        wsSyncing = true;
+        syncBtn.innerText = '同步中...';
+        syncBtn.disabled = true;
+        console.log('点击同步按钮');
+        console.log('WebSocket状态:', window.ws ? window.ws.readyState : '未创建');
+        // 通过WebSocket下发同步请求
+        if (window.ws && window.ws.readyState === 1) {
+            const syncMsg = {type: 'sync_request', device_id: '{{ device.device_id }}'};
+            console.log('发送同步请求:', syncMsg);
+            window.ws.send(JSON.stringify(syncMsg));
+        } else {
+            console.log('WebSocket未连接，状态:', window.ws ? window.ws.readyState : 'null');
+            alert('WebSocket未连接，无法同步');
+            wsSyncing = false;
+            syncBtn.innerText = '🔄 数据同步';
+            syncBtn.disabled = false;
+        }
+    };
+    // 监听WebSocket同步完成消息
+    function handleSyncResult(msg) {
+        console.log('handleSyncResult收到消息:', msg);
+        if (msg.type === 'sync_result' && msg.device_id === '{{ device.device_id }}') {
+            wsSyncing = false;
+            syncBtn.innerText = '🔄 数据同步';
+            syncBtn.disabled = false;
+            alert('数据同步完成！');
+            setTimeout(function() {
+                location.reload();
+            }, 500); // 延迟500ms再刷新，保证消息处理完毕
+        }
+    }
     // 删除弹窗控制
     let deletePlanId = null;
     function confirmDeletePlan(id) {
@@ -628,7 +723,7 @@
         }).then(res => res.json()).then(result => {
             if (result.status === 'success') {
                 alert('删除成功！');
-                location.reload();
+                safeReload();
             } else {
                 alert(result.error || '删除失败');
             }
@@ -655,7 +750,7 @@
             if (res.ok) {
                 document.getElementById('deletePlanMsg').innerText = '删除成功！';
                 document.getElementById('deletePlanMsg').className = 'msg success';
-                setTimeout(()=>{ location.reload(); }, 800);
+                safeReload(800);
             } else {
                 document.getElementById('deletePlanMsg').innerText = result.error || '删除失败';
                 document.getElementById('deletePlanMsg').className = 'msg error';
@@ -724,7 +819,7 @@
                         p.feeding_amount == data.feeding_amount
                     )) {
                         msgDiv.innerText = '添加成功！';
-                        setTimeout(()=>{ location.reload(); }, 800);
+                        safeReload(800);
                     } else if (++retry < maxRetry) {
                         setTimeout(poll, 1000);
                     } else if (tryCount < maxSend) {
@@ -824,7 +919,7 @@
                     );
                     if (m && m.is_confirmed) {
                         msgDiv.innerText = m.is_executed ? '喂食成功！' : '下发成功，等待设备执行...';
-                        setTimeout(()=>{ location.reload(); }, 800);
+                        safeReload(800);
                     } else if (++retry < maxRetry) {
                         setTimeout(poll, 1000);
                     } else if (tryCount < maxSend) {
@@ -848,7 +943,7 @@
         }).then(res => res.json()).then(result => {
             if (result.status === 'success') {
                 document.getElementById('manualFeedPopupMsg').innerText = '下发成功，等待设备执行...';
-                setTimeout(()=>{ location.reload(); }, 800);
+                safeReload(800);
             } else {
                 document.getElementById('manualFeedPopupMsg').innerText = result.error || '喂食失败';
             }
@@ -922,7 +1017,7 @@
                 if (res.ok) {
                     document.getElementById('deletePlanMsg').innerText = '删除成功！';
                     document.getElementById('deletePlanMsg').className = 'msg success';
-                    setTimeout(()=>{ location.reload(); }, 800);
+                    safeReload(800);
                 } else {
                     document.getElementById('deletePlanMsg').innerText = result.error || '删除失败';
                     document.getElementById('deletePlanMsg').className = 'msg error';
@@ -958,7 +1053,7 @@
                 if (res.ok) {
                     document.getElementById('deletePlanMsg').innerText = '删除成功！';
                     document.getElementById('deletePlanMsg').className = 'msg success';
-                    setTimeout(()=>{ location.reload(); }, 800);
+                    safeReload(800);
                 } else {
                     document.getElementById('deletePlanMsg').innerText = result.error || '删除失败';
                     document.getElementById('deletePlanMsg').className = 'msg error';
