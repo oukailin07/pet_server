@@ -19,7 +19,7 @@
             border-radius: 20px;
             box-shadow: 0 8px 32px rgba(60, 120, 200, 0.13), 0 1.5px 4px rgba(0,0,0,0.04);
             padding: 40px 36px 28px 36px;
-            width: 350px;
+            width: 400px;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -39,6 +39,41 @@
             font-size: 15px;
             color: #888;
             margin-bottom: 22px;
+        }
+        .login-tabs {
+            display: flex;
+            width: 100%;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid #e5e7eb;
+        }
+        .tab {
+            flex: 1;
+            padding: 12px;
+            text-align: center;
+            background: #f9fafb;
+            color: #6b7280;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: none;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        .tab.active {
+            background: #4f46e5;
+            color: white;
+        }
+        .tab:hover {
+            background: #6366f1;
+            color: white;
+        }
+        .login-form {
+            width: 100%;
+            display: none;
+        }
+        .login-form.active {
+            display: block;
         }
         label {
             display: block;
@@ -84,6 +119,26 @@
             margin-top: 10px;
             text-align: center;
         }
+        .flash-messages {
+            width: 100%;
+            margin-bottom: 15px;
+        }
+        .flash-message {
+            padding: 10px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+        .flash-error {
+            background: #fef2f2;
+            color: #dc2626;
+            border: 1px solid #fecaca;
+        }
+        .flash-success {
+            background: #f0fdf4;
+            color: #16a34a;
+            border: 1px solid #bbf7d0;
+        }
         @media (max-width: 500px) {
             .login-card {
                 width: 96vw;
@@ -96,15 +151,69 @@
     <div class="login-card">
         <div class="logo">🐾</div>
         <div class="title">宠物喂食器</div>
-        <div class="subtitle">请输入设备ID和密码登录</div>
-        <form method="post" action="/login" style="width:100%;">
-            <label for="device_id">设备ID</label>
-            <input type="text" id="device_id" name="device_id" placeholder="例如: ESP-001" required>
-            <label for="password">密码</label>
-            <input type="password" id="password" name="password" placeholder="请输入密码" required>
-            <button type="submit">登录</button>
+        <div class="subtitle">请选择登录方式</div>
+        
+        <div class="login-tabs">
+            <button type="button" class="tab active" onclick="switchTab('device')">设备登录</button>
+            <button type="button" class="tab" onclick="switchTab('admin')">管理员登录</button>
+        </div>
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+            <div class="flash-messages">
+                {% for category, message in messages %}
+                <div class="flash-message flash-{{ category }}">
+                    {{ message }}
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        {% endwith %}
+        
+        <!-- 设备登录表单 -->
+        <form method="post" action="/login" class="login-form active" id="device-form">
+            <input type="hidden" name="login_type" value="device">
+            <label for="device_username">设备ID</label>
+            <input type="text" id="device_username" name="username" placeholder="例如: ESP-001" required>
+            <label for="device_password">密码</label>
+            <input type="password" id="device_password" name="password" placeholder="请输入密码" required>
+            <button type="submit">设备登录</button>
         </form>
-        <div class="tips">新设备首次连接时会自动分配设备ID和密码</div>
+        
+        <!-- 管理员登录表单 -->
+        <form method="post" action="/login" class="login-form" id="admin-form">
+            <input type="hidden" name="login_type" value="admin">
+            <label for="admin_username">管理员用户名</label>
+            <input type="text" id="admin_username" name="username" placeholder="请输入管理员用户名" required>
+            <label for="admin_password">密码</label>
+            <input type="password" id="admin_password" name="password" placeholder="请输入管理员密码" required>
+            <button type="submit">管理员登录</button>
+        </form>
+        
+        <div class="tips">
+            <div id="device-tips">新设备首次连接时会自动分配设备ID和密码</div>
+            <div id="admin-tips" style="display: none;">管理员可以查看和管理所有设备</div>
+        </div>
     </div>
+    
+    <script>
+        function switchTab(type) {
+            // 更新标签页状态
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            // 更新表单显示
+            document.querySelectorAll('.login-form').forEach(form => form.classList.remove('active'));
+            if (type === 'device') {
+                document.getElementById('device-form').classList.add('active');
+                document.getElementById('device-tips').style.display = 'block';
+                document.getElementById('admin-tips').style.display = 'none';
+            } else {
+                document.getElementById('admin-form').classList.add('active');
+                document.getElementById('device-tips').style.display = 'none';
+                document.getElementById('admin-tips').style.display = 'block';
+            }
+        }
+    </script>
 </body>
 </html> 

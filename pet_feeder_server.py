@@ -49,6 +49,19 @@ pending_sync_frontends = {}  # device_id -> frontend websocket connection
 ws_loop = None
 
 # 数据库模型
+class AdminUser(db.Model):
+    """管理员用户表"""
+    __tablename__ = 'admin_users'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(50), unique=True, nullable=False)
+    password = db.Column(db.String(100), nullable=False)
+    email = db.Column(db.String(100), nullable=True)
+    role = db.Column(db.String(20), default='admin')  # admin, super_admin
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_login = db.Column(db.DateTime, nullable=True)
+
 class Device(db.Model):
     """设备信息表"""
     __tablename__ = 'devices'
@@ -366,13 +379,21 @@ def index():
             return '', 404
         print("收到POST /，请求头：", dict(request.headers))
         return redirect(url_for('index'))
-    if 'device_id' not in session:
-        return redirect(url_for('login'))
-    device_id = session['device_id']
-    device = Device.query.filter_by(device_id=device_id).first()
-    if not device:
-        session.pop('device_id', None)
-        return redirect(url_for('login'))
+    # 管理员支持通过?device_id=xxx切换设备视图
+    if 'admin_user' in session and request.args.get('device_id'):
+        device_id = request.args.get('device_id')
+        device = Device.query.filter_by(device_id=device_id).first()
+        if not device:
+            flash('设备不存在', 'error')
+            return redirect(url_for('admin_devices'))
+    else:
+        if 'device_id' not in session:
+            return redirect(url_for('login'))
+        device_id = session['device_id']
+        device = Device.query.filter_by(device_id=device_id).first()
+        if not device:
+            session.pop('device_id', None)
+            return redirect(url_for('login'))
     beijing = pytz.timezone('Asia/Shanghai')
     last_seen_local = device.last_seen.replace(tzinfo=pytz.utc).astimezone(beijing) if device.last_seen else None
     last_grain_update_local = device.last_grain_update.replace(tzinfo=pytz.utc).astimezone(beijing) if device.last_grain_update else None
@@ -380,14 +401,12 @@ def index():
     manual_feedings = ManualFeeding.query.filter_by(device_id=device_id, is_executed=False, is_pending_delete=False).all()
     recent_manual_feedings = ManualFeeding.query.filter_by(device_id=device_id, is_pending_delete=False).order_by(ManualFeeding.created_at.desc()).limit(10).all()
     recent_records = FeedingRecord.query.filter_by(device_id=device_id).order_by(FeedingRecord.created_at.desc()).limit(10).all()
-    
     # 预处理时间，转换为北京时间
     for record in recent_records:
         record.created_at_local = record.created_at.replace(tzinfo=pytz.utc).astimezone(beijing)
     for m in recent_manual_feedings:
         if m.executed_at:
             m.executed_at_local = m.executed_at.replace(tzinfo=pytz.utc).astimezone(beijing)
-    
     # 合并喂食计划
     merged_plans = {}
     for plan in feeding_plans:
@@ -415,24 +434,49 @@ def index():
                          merged_plans=merged_plans,
                          merged_manuals=merged_manuals)
 
+# 权限检查装饰器
+def admin_required(f):
+    """管理员权限检查装饰器"""
+    def decorated_function(*args, **kwargs):
+        if 'admin_user' not in session:
+            flash('需要管理员权限', 'error')
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    decorated_function.__name__ = f.__name__
+    return decorated_function
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     """登录页面"""
     if request.method == 'POST':
-        device_id = request.form.get('device_id')
+        username = request.form.get('username')
         password = request.form.get('password')
+        login_type = request.form.get('login_type', 'device')  # device 或 admin
         
-        if not device_id or not password:
-            flash('请输入设备ID和密码', 'error')
+        if not username or not password:
+            flash('请输入用户名和密码', 'error')
             return render_template('login.html')
         
-        device = Device.query.filter_by(device_id=device_id).first()
-        
-        if device and check_password_hash(device.password, password):
-            session['device_id'] = device_id
-            return redirect(url_for('index'))
+        if login_type == 'admin':
+            # 管理员登录
+            admin_user = AdminUser.query.filter_by(username=username, is_active=True).first()
+            if admin_user and check_password_hash(admin_user.password, password):
+                session['admin_user'] = admin_user.username
+                session['admin_role'] = admin_user.role
+                # 更新最后登录时间
+                admin_user.last_login = datetime.utcnow()
+                db.session.commit()
+                return redirect(url_for('admin_dashboard'))
+            else:
+                flash('管理员用户名或密码错误', 'error')
         else:
-            flash('设备ID或密码错误', 'error')
+            # 设备登录
+            device = Device.query.filter_by(device_id=username).first()
+            if device and check_password_hash(device.password, password):
+                session['device_id'] = username
+                return redirect(url_for('index'))
+            else:
+                flash('设备ID或密码错误', 'error')
     
     return render_template('login.html')
 
@@ -440,6 +484,8 @@ def login():
 def logout():
     """登出"""
     session.pop('device_id', None)
+    session.pop('admin_user', None)
+    session.pop('admin_role', None)
     return redirect(url_for('login'))
 
 @app.route('/devices')
@@ -447,6 +493,96 @@ def list_devices():
     """设备列表（管理员页面）"""
     devices = Device.query.all()
     return render_template('devices.html', devices=devices)
+
+@app.route('/admin')
+@admin_required
+def admin_dashboard():
+    """管理员仪表板"""
+    # 获取所有设备
+    devices = Device.query.all()
+    
+    # 统计信息
+    total_devices = len(devices)
+    online_devices = len([d for d in devices if d.is_online])
+    offline_devices = total_devices - online_devices
+    
+    # 获取最近的喂食记录
+    recent_records = FeedingRecord.query.order_by(FeedingRecord.created_at.desc()).limit(20).all()
+    
+    # 获取最近的手动喂食
+    recent_manuals = ManualFeeding.query.order_by(ManualFeeding.created_at.desc()).limit(20).all()
+    
+    # 转换为北京时间
+    beijing = pytz.timezone('Asia/Shanghai')
+    for device in devices:
+        device.last_seen_local = device.last_seen.replace(tzinfo=pytz.utc).astimezone(beijing) if device.last_seen else None
+        device.last_grain_update_local = device.last_grain_update.replace(tzinfo=pytz.utc).astimezone(beijing) if device.last_grain_update else None
+    
+    for record in recent_records:
+        record.created_at_local = record.created_at.replace(tzinfo=pytz.utc).astimezone(beijing)
+    
+    for manual in recent_manuals:
+        if manual.executed_at:
+            manual.executed_at_local = manual.executed_at.replace(tzinfo=pytz.utc).astimezone(beijing)
+    
+    return render_template('admin_dashboard.html',
+                         devices=devices,
+                         total_devices=total_devices,
+                         online_devices=online_devices,
+                         offline_devices=offline_devices,
+                         recent_records=recent_records,
+                         recent_manuals=recent_manuals)
+
+@app.route('/admin/devices')
+@admin_required
+def admin_devices():
+    """管理员设备管理页面"""
+    devices = Device.query.all()
+    beijing = pytz.timezone('Asia/Shanghai')
+    
+    for device in devices:
+        device.last_seen_local = device.last_seen.replace(tzinfo=pytz.utc).astimezone(beijing) if device.last_seen else None
+        device.last_grain_update_local = device.last_grain_update.replace(tzinfo=pytz.utc).astimezone(beijing) if device.last_grain_update else None
+        # 检查设备是否在线
+        device.is_online_now = (datetime.utcnow() - device.last_seen).total_seconds() < 300 if device.last_seen else False
+    
+    return render_template('admin_devices.html', devices=devices)
+
+@app.route('/admin/device/<device_id>')
+@admin_required
+def admin_device_detail(device_id):
+    """管理员查看单个设备详情"""
+    device = Device.query.filter_by(device_id=device_id).first()
+    if not device:
+        flash('设备不存在', 'error')
+        return redirect(url_for('admin_devices'))
+    
+    # 获取设备的喂食计划
+    feeding_plans = FeedingPlan.query.filter_by(device_id=device_id, is_active=True, is_pending_delete=False).all()
+    
+    # 获取设备的手动喂食记录
+    manual_feedings = ManualFeeding.query.filter_by(device_id=device_id, is_pending_delete=False).order_by(ManualFeeding.created_at.desc()).limit(50).all()
+    
+    # 获取设备的喂食记录
+    feeding_records = FeedingRecord.query.filter_by(device_id=device_id).order_by(FeedingRecord.created_at.desc()).limit(50).all()
+    
+    # 转换为北京时间
+    beijing = pytz.timezone('Asia/Shanghai')
+    device.last_seen_local = device.last_seen.replace(tzinfo=pytz.utc).astimezone(beijing) if device.last_seen else None
+    device.last_grain_update_local = device.last_grain_update.replace(tzinfo=pytz.utc).astimezone(beijing) if device.last_grain_update else None
+    
+    for record in feeding_records:
+        record.created_at_local = record.created_at.replace(tzinfo=pytz.utc).astimezone(beijing)
+    
+    for manual in manual_feedings:
+        if manual.executed_at:
+            manual.executed_at_local = manual.executed_at.replace(tzinfo=pytz.utc).astimezone(beijing)
+    
+    return render_template('admin_device_detail.html',
+                         device=device,
+                         feeding_plans=feeding_plans,
+                         manual_feedings=manual_feedings,
+                         feeding_records=feeding_records)
 
 @app.route('/api/devices')
 def api_devices():
@@ -1443,6 +1579,69 @@ def add_pending_delete_fields():
         except Exception as e:
             print(f'添加字段时出错: {e}')
             db.session.rollback()
+
+@app.cli.command('create_admin')
+def create_admin():
+    """创建管理员账户"""
+    with app.app_context():
+        try:
+            # 确保表存在
+            db.create_all()
+            
+            username = input('请输入管理员用户名: ')
+            password = input('请输入管理员密码: ')
+            email = input('请输入邮箱(可选): ') or None
+            role = input('请输入角色(admin/super_admin, 默认admin): ') or 'admin'
+            
+            # 检查用户名是否已存在
+            existing_admin = AdminUser.query.filter_by(username=username).first()
+            if existing_admin:
+                print(f'用户名 {username} 已存在')
+                return
+            
+            # 创建管理员账户
+            admin_user = AdminUser(
+                username=username,
+                password=generate_password_hash(password),
+                email=email,
+                role=role
+            )
+            
+            db.session.add(admin_user)
+            db.session.commit()
+            
+            print(f'管理员账户 {username} 创建成功')
+            print(f'角色: {role}')
+            print(f'请使用此账户登录管理员界面')
+            
+        except Exception as e:
+            print(f'创建管理员账户时出错: {e}')
+            db.session.rollback()
+
+@app.cli.command('list_admins')
+def list_admins():
+    """列出所有管理员账户"""
+    with app.app_context():
+        try:
+            admins = AdminUser.query.all()
+            if not admins:
+                print('没有找到管理员账户')
+                return
+            
+            print('管理员账户列表:')
+            print('-' * 60)
+            for admin in admins:
+                print(f'ID: {admin.id}')
+                print(f'用户名: {admin.username}')
+                print(f'邮箱: {admin.email or "无"}')
+                print(f'角色: {admin.role}')
+                print(f'状态: {"激活" if admin.is_active else "禁用"}')
+                print(f'创建时间: {admin.created_at}')
+                print(f'最后登录: {admin.last_login or "从未登录"}')
+                print('-' * 60)
+                
+        except Exception as e:
+            print(f'列出管理员账户时出错: {e}')
 
 if __name__ == "__main__":
     import threading

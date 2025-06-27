@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>设备详情 - 宠物喂食器系统</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: rgba(255,255,255,0.95);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.08);
+        }
+        .header h1 {
+            color: #4a5568;
+            margin-bottom: 10px;
+        }
+        .nav {
+            display: flex;
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .nav a {
+            background: #4299e1;
+            color: white;
+            padding: 10px 20px;
+            text-decoration: none;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+        .nav a:hover {
+            background: #3182ce;
+        }
+        .section {
+            background: rgba(255,255,255,0.97);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+        }
+        .section h2 {
+            color: #4a5568;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 6px;
+        }
+        .info-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 10px;
+        }
+        .info-table th, .info-table td {
+            padding: 8px 10px;
+            border-bottom: 1px solid #e2e8f0;
+            text-align: left;
+        }
+        .info-table th {
+            color: #6366f1;
+            background: #f3f4f6;
+        }
+        .info-table tr:last-child td {
+            border-bottom: none;
+        }
+        .record-list, .plan-list, .manual-list {
+            max-height: 250px;
+            overflow-y: auto;
+        }
+        .record-item, .plan-item, .manual-item {
+            background: #f7fafc;
+            border-radius: 8px;
+            padding: 10px 14px;
+            margin-bottom: 10px;
+            border-left: 4px solid #4299e1;
+        }
+        .record-item {
+            border-left-color: #48bb78;
+        }
+        .manual-item {
+            border-left-color: #ecc94b;
+        }
+        .plan-item {
+            border-left-color: #4299e1;
+        }
+        .item-title {
+            font-weight: bold;
+            color: #2d3748;
+        }
+        .item-info {
+            color: #718096;
+            font-size: 0.95em;
+        }
+        @media (max-width: 700px) {
+            .container { padding: 5px; }
+            .header, .section { padding: 10px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>设备详情 - {{ device.device_id }}</h1>
+            <div class="nav">
+                <a href="{{ url_for('admin_dashboard') }}">仪表板</a>
+                <a href="{{ url_for('admin_devices') }}">设备管理</a>
+                <a href="{{ url_for('index') }}">返回首页</a>
+            </div>
+        </div>
+        <div class="section">
+            <h2>基本信息</h2>
+            <table class="info-table">
+                <tr><th>设备ID</th><td>{{ device.device_id }}</td></tr>
+                <tr><th>设备类型</th><td>{{ device.device_type }}</td></tr>
+                <tr><th>固件版本</th><td>{{ device.firmware_version }}</td></tr>
+                <tr><th>首次连接</th><td>{{ device.first_seen.strftime('%Y-%m-%d %H:%M:%S') if device.first_seen else '未知' }}</td></tr>
+                <tr><th>最后在线</th><td>{{ device.last_seen_local.strftime('%Y-%m-%d %H:%M:%S') if device.last_seen_local else '未知' }}</td></tr>
+                <tr><th>粮桶重量</th><td>{{ device.grain_weight }}g</td></tr>
+                <tr><th>心跳次数</th><td>{{ device.heartbeat_count }}</td></tr>
+                <tr><th>在线状态</th><td>{% if device.is_online %}🟢 在线{% else %}🔴 离线{% endif %}</td></tr>
+            </table>
+        </div>
+        <div class="section">
+            <h2>喂食计划</h2>
+            <div class="plan-list">
+                {% for plan in feeding_plans %}
+                <div class="plan-item">
+                    <div class="item-title">星期{{ plan.day_of_week }} {{ '%02d'|format(plan.hour) }}:{{ '%02d'|format(plan.minute) }} - {{ plan.feeding_amount }}g</div>
+                    <div class="item-info">创建时间: {{ plan.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</div>
+                </div>
+                {% else %}
+                <div class="item-info">暂无喂食计划</div>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="section">
+            <h2>手动喂食记录</h2>
+            <div class="manual-list">
+                {% for m in manual_feedings %}
+                <div class="manual-item">
+                    <div class="item-title">{{ '%02d'|format(m.hour) }}:{{ '%02d'|format(m.minute) }} - {{ m.feeding_amount }}g {% if m.is_executed %}✅已执行{% elif m.is_confirmed %}⏳待执行{% else %}⌛待确认{% endif %}</div>
+                    <div class="item-info">创建时间: {{ m.created_at.strftime('%Y-%m-%d %H:%M:%S') }}{% if m.executed_at_local %}，执行时间: {{ m.executed_at_local.strftime('%Y-%m-%d %H:%M:%S') }}{% endif %}</div>
+                </div>
+                {% else %}
+                <div class="item-info">暂无手动喂食记录</div>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="section">
+            <h2>喂食记录</h2>
+            <div class="record-list">
+                {% for r in feeding_records %}
+                <div class="record-item">
+                    <div class="item-title">{{ r.created_at_local.strftime('%Y-%m-%d %H:%M:%S') }} - {{ r.feeding_amount }}g</div>
+                    <div class="item-info">状态: {{ r.status }} | 实际: {{ r.actual_amount or r.feeding_amount }}g</div>
+                </div>
+                {% else %}
+                <div class="item-info">暂无喂食记录</div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</body>
+</html> 
