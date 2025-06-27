@@ -2,5 +2,7 @@ Flask==2.3.3
 Flask-SQLAlchemy==3.0.5
 Werkzeug==2.3.7
 SQLAlchemy==2.0.21
+websockets==11.0.3
+pytz==2023.3
 flask-socketio
 eventlet 
