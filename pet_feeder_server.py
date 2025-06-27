@@ -1643,6 +1643,31 @@ def list_admins():
         except Exception as e:
             print(f'列出管理员账户时出错: {e}')
 
+@app.route('/ota_update', methods=['POST'])
+def ota_update():
+    """设备OTA升级接口，普通用户可用"""
+    if 'device_id' not in session:
+        return jsonify({'error': '未登录，无法操作'}), 401
+    device_id = session['device_id']
+    data = request.get_json()
+    url = data.get('url') if data else None
+    if not url or not url.startswith('http'):
+        return jsonify({'error': '请提供合法的固件URL'}), 400
+    ws = connected_devices.get(device_id)
+    if ws and ws_loop:
+        try:
+            msg = {
+                "type": "ota_update",
+                "url": url
+            }
+            import asyncio
+            asyncio.run_coroutine_threadsafe(ws.send(json.dumps(msg)), ws_loop)
+            return jsonify({'status': 'success', 'message': 'OTA升级指令已下发'}), 200
+        except Exception as e:
+            return jsonify({'error': f'WebSocket下发失败: {e}'}), 500
+    else:
+        return jsonify({'error': '设备未在线，无法下发OTA升级'}), 400
+
 if __name__ == "__main__":
     import threading
     t = threading.Thread(target=check_device_online, daemon=True)

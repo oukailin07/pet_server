@@ -547,6 +547,14 @@
                 {% endif %}
             </table>
         </div>
+        <div class="card-section" style="margin-bottom: 28px;">
+            <div class="section-title"><span class="icon">🔄</span> 设备OTA固件升级</div>
+            <form id="ota-form" style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                <input type="url" id="ota-url" name="ota_url" placeholder="请输入固件下载URL，如 http://your-server.com/firmware.bin" style="flex:1; min-width:220px; padding:10px 12px; border-radius:6px; border:1px solid #d1d5db; font-size:15px;" required>
+                <button type="submit" style="padding:10px 28px; border:none; border-radius:6px; background:linear-gradient(90deg,#22d3ee 0%,#6366f1 100%); color:#fff; font-size:16px; font-weight:600; cursor:pointer; transition:background 0.2s;">立即升级</button>
+            </form>
+            <div id="ota-msg" class="msg" style="display:none;"></div>
+        </div>
         <!-- 添加喂食计划弹窗 -->
         <div class="modal add-plan-modal" id="addPlanModal">
             <div class="modal-content">
@@ -1079,6 +1087,35 @@
         }
         confirmDeleteMergedManual(key);
     }
+    // OTA升级表单提交
+    const otaForm = document.getElementById('ota-form');
+    const otaMsg = document.getElementById('ota-msg');
+    otaForm.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        otaMsg.style.display = 'none';
+        const url = document.getElementById('ota-url').value.trim();
+        if (!url) return;
+        otaMsg.textContent = '正在下发OTA升级指令...';
+        otaMsg.style.display = 'block';
+        try {
+            const resp = await fetch('/ota_update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url })
+            });
+            const data = await resp.json();
+            if (data.status === 'success') {
+                otaMsg.textContent = 'OTA升级指令已下发，请等待设备响应。';
+                otaMsg.style.color = '#388e3c';
+            } else {
+                otaMsg.textContent = data.error || 'OTA升级失败';
+                otaMsg.style.color = '#e53935';
+            }
+        } catch (err) {
+            otaMsg.textContent = '网络错误，升级指令未下发';
+            otaMsg.style.color = '#e53935';
+        }
+    });
     </script>
 </body>
 </html>
