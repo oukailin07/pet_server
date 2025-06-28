@@ -71,12 +71,55 @@ class Device(db.Model):
     password = db.Column(db.String(100), nullable=False)
     device_type = db.Column(db.String(50), default='pet_feeder')
     firmware_version = db.Column(db.String(20), default='1.0.0')
+    protocol_version = db.Column(db.String(10), default='1.0')  # 新增：协议版本
+    hardware_version = db.Column(db.String(10), default='1.0')  # 新增：硬件版本
     first_seen = db.Column(db.DateTime, default=datetime.utcnow)
     last_seen = db.Column(db.DateTime, default=datetime.utcnow)
     is_online = db.Column(db.Boolean, default=False)
     heartbeat_count = db.Column(db.Integer, default=0)
     grain_weight = db.Column(db.Float, default=0.0)  # 粮桶重量
     last_grain_update = db.Column(db.DateTime, default=datetime.utcnow)
+    boot_count = db.Column(db.Integer, default=0)  # 新增：启动次数
+    install_time = db.Column(db.DateTime, default=datetime.utcnow)  # 新增：安装时间
+
+class FirmwareVersion(db.Model):
+    """固件版本管理表"""
+    __tablename__ = 'firmware_versions'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    version_string = db.Column(db.String(32), unique=True, nullable=False)  # 如 "v1.0.0"
+    major = db.Column(db.Integer, nullable=False)
+    minor = db.Column(db.Integer, nullable=False)
+    patch = db.Column(db.Integer, nullable=False)
+    build = db.Column(db.Integer, default=0)
+    suffix = db.Column(db.String(16), default='stable')
+    build_date = db.Column(db.String(20), nullable=True)
+    build_time = db.Column(db.String(20), nullable=True)
+    git_hash = db.Column(db.String(16), nullable=True)
+    download_url = db.Column(db.String(256), nullable=True)
+    file_size = db.Column(db.Integer, default=0)
+    checksum = db.Column(db.String(64), nullable=True)
+    is_stable = db.Column(db.Boolean, default=True)
+    is_force_update = db.Column(db.Boolean, default=False)  # 是否强制更新
+    min_hardware_version = db.Column(db.String(10), default='1.0')  # 最低硬件版本要求
+    min_protocol_version = db.Column(db.String(10), default='1.0')  # 最低协议版本要求
+    release_notes = db.Column(db.Text, nullable=True)  # 发布说明
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    is_active = db.Column(db.Boolean, default=True)
+
+class DeviceVersionHistory(db.Model):
+    """设备版本历史记录表"""
+    __tablename__ = 'device_version_history'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    device_id = db.Column(db.String(20), db.ForeignKey('devices.device_id'), nullable=False)
+    from_version = db.Column(db.String(32), nullable=True)  # 升级前版本
+    to_version = db.Column(db.String(32), nullable=False)   # 升级后版本
+    upgrade_type = db.Column(db.String(20), default='ota')  # ota, rollback, manual
+    status = db.Column(db.String(20), default='success')    # success, failed, in_progress
+    error_message = db.Column(db.Text, nullable=True)
+    upgrade_time = db.Column(db.DateTime, default=datetime.utcnow)
+    operator = db.Column(db.String(50), nullable=True)  # 操作者（管理员或系统）
 
 class FeedingPlan(db.Model):
     """喂食计划表"""
@@ -584,6 +627,14 @@ def admin_device_detail(device_id):
                          manual_feedings=manual_feedings,
                          feeding_records=feeding_records)
 
+@app.route('/admin/versions')
+def admin_versions():
+    """版本管理页面，登录用户和管理员都可访问"""
+    if 'device_id' not in session and 'admin_user' not in session:
+        flash('请先登录', 'error')
+        return redirect(url_for('login'))
+    return render_template('admin_version_management.html')
+
 @app.route('/api/devices')
 def api_devices():
     """API: 获取所有设备"""
@@ -1029,7 +1080,32 @@ async def ws_handler(websocket):
             connected_devices[device_id] = websocket
             print(f"设备 {device_id} 注册，当前在线设备: {list(connected_devices.keys())}")
             with app.app_context():
-                Device.query.filter_by(device_id=device_id).update({"is_online": True, "last_seen": datetime.utcnow()})
+                # 更新设备信息，包括版本信息
+                device = Device.query.filter_by(device_id=device_id).first()
+                if device:
+                    device.is_online = True
+                    device.last_seen = datetime.utcnow()
+                    # 更新版本信息（如果设备提供了）
+                    if data.get("firmware_version"):
+                        device.firmware_version = data["firmware_version"]
+                    if data.get("protocol_version"):
+                        device.protocol_version = data["protocol_version"]
+                    if data.get("hardware_version"):
+                        device.hardware_version = data["hardware_version"]
+                else:
+                    # 如果设备不存在，创建新设备记录
+                    device = Device(
+                        device_id=device_id,
+                        password=generate_password_hash("123456"),  # 默认密码
+                        firmware_version=data.get("firmware_version", "1.0.0"),
+                        protocol_version=data.get("protocol_version", "1.0"),
+                        hardware_version=data.get("hardware_version", "1.0"),
+                        first_seen=datetime.utcnow(),
+                        last_seen=datetime.utcnow(),
+                        is_online=True,
+                        heartbeat_count=1
+                    )
+                    db.session.add(device)
                 db.session.commit()
             await websocket.send(json.dumps({"status": "registered"}))
             print(f"设备 {device_id} 已连接 WebSocket")
@@ -1435,6 +1511,155 @@ async def ws_handler(websocket):
                                             print(f"推送粮桶重量到前端失败: {e}")
                             else:
                                 print(f"收到非法grain_weight数值: {grain_weight}，已忽略。device_id={device_id}")
+                    # 新增：设备版本检查请求
+                    elif msg_data.get('type') == 'version_check':
+                        with app.app_context():
+                            device_id = msg_data.get('device_id')
+                            firmware_version = msg_data.get('firmware_version')
+                            protocol_version = msg_data.get('protocol_version')
+                            hardware_version = msg_data.get('hardware_version')
+                            
+                            print(f"收到设备 {device_id} 版本检查请求:")
+                            print(f"  固件版本: {firmware_version}")
+                            print(f"  协议版本: {protocol_version}")
+                            print(f"  硬件版本: {hardware_version}")
+                            
+                            # 更新设备版本信息
+                            device = Device.query.filter_by(device_id=device_id).first()
+                            if device:
+                                device.firmware_version = firmware_version
+                                device.protocol_version = protocol_version
+                                device.hardware_version = hardware_version
+                                device.last_seen = datetime.utcnow()
+                                db.session.commit()
+                            
+                            # 检查是否有可用更新
+                            latest_version = get_latest_firmware_version(device_id)
+                            if latest_version:
+                                # 检查版本兼容性
+                                is_compatible = check_version_compatibility(
+                                    firmware_version, protocol_version, hardware_version,
+                                    latest_version
+                                )
+                                
+                                response = {
+                                    "type": "version_check_result",
+                                    "device_id": device_id,
+                                    "has_update": True,
+                                    "latest_version": latest_version.version_string,
+                                    "download_url": latest_version.download_url,
+                                    "force_update": latest_version.is_force_update,
+                                    "file_size": latest_version.file_size,
+                                    "checksum": latest_version.checksum,
+                                    "release_notes": latest_version.release_notes,
+                                    "is_compatible": is_compatible
+                                }
+                            else:
+                                response = {
+                                    "type": "version_check_result",
+                                    "device_id": device_id,
+                                    "has_update": False
+                                }
+                            
+                            # 发送版本检查响应
+                            try:
+                                await websocket.send(json.dumps(response))
+                                print(f"已回复设备 {device_id} 版本检查结果: {response}")
+                            except Exception as e:
+                                print(f"发送版本检查响应失败: {e}")
+                    # 新增：设备版本检查结果响应
+                    elif msg_data.get('type') == 'version_check_result':
+                        # 这是设备对服务器版本检查的响应，通常不需要处理
+                        print(f"收到设备版本检查响应: {msg_data}")
+                    # 新增：设备版本升级状态上报
+                    elif msg_data.get('type') == 'ota_status':
+                        with app.app_context():
+                            device_id = msg_data.get('device_id')
+                            status = msg_data.get('status')
+                            progress = msg_data.get('progress', 0)
+                            error_code = msg_data.get('error_code', 0)
+                            error_message = msg_data.get('error_message', '')
+                            target_version = msg_data.get('target_version', '')
+                            
+                            print(f"设备 {device_id} OTA状态更新: {status}, 进度: {progress}%")
+                            
+                            # 记录版本升级历史
+                            if status in ['success', 'failed']:
+                                history = DeviceVersionHistory(
+                                    device_id=device_id,
+                                    to_version=target_version,
+                                    upgrade_type='ota',
+                                    status=status,
+                                    error_message=error_message if status == 'failed' else None,
+                                    operator='system'
+                                )
+                                db.session.add(history)
+                                db.session.commit()
+                            
+                            # 推送到前端
+                            for ws_client in list(connected_devices.values()):
+                                try:
+                                    await ws_client.send(json.dumps({
+                                        'type': 'ota_status_update',
+                                        'device_id': device_id,
+                                        'status': status,
+                                        'progress': progress,
+                                        'error_code': error_code,
+                                        'error_message': error_message,
+                                        'target_version': target_version,
+                                        'update_time': datetime.utcnow().isoformat()
+                                    }))
+                                except Exception as e:
+                                    print(f"推送OTA状态到前端失败: {e}")
+                    # 新增：设备版本回滚请求
+                    elif msg_data.get('type') == 'rollback_request':
+                        with app.app_context():
+                            device_id = msg_data.get('device_id')
+                            target_version = msg_data.get('target_version')
+                            reason = msg_data.get('reason', '')
+                            
+                            print(f"收到设备 {device_id} 版本回滚请求: {target_version}, 原因: {reason}")
+                            
+                            # 查找目标版本
+                            target_fw = FirmwareVersion.query.filter_by(
+                                version_string=target_version,
+                                is_active=True
+                            ).first()
+                            
+                            if target_fw and target_fw.download_url:
+                                response = {
+                                    "type": "rollback_result",
+                                    "device_id": device_id,
+                                    "target_version": target_version,
+                                    "success": True,
+                                    "download_url": target_fw.download_url,
+                                    "checksum": target_fw.checksum
+                                }
+                                
+                                # 记录回滚历史
+                                history = DeviceVersionHistory(
+                                    device_id=device_id,
+                                    to_version=target_version,
+                                    upgrade_type='rollback',
+                                    status='in_progress',
+                                    operator='system'
+                                )
+                                db.session.add(history)
+                                db.session.commit()
+                            else:
+                                response = {
+                                    "type": "rollback_result",
+                                    "device_id": device_id,
+                                    "target_version": target_version,
+                                    "success": False,
+                                    "error": "目标版本不存在或无效"
+                                }
+                            
+                            try:
+                                await websocket.send(json.dumps(response))
+                                print(f"已回复设备 {device_id} 回滚请求: {response}")
+                            except Exception as e:
+                                print(f"发送回滚响应失败: {e}")
                     else:
                         print(f"未知消息类型: {msg_data.get('type')} websocket id={id(websocket)} peer={peer}")
                 except json.JSONDecodeError as e:
@@ -1580,6 +1805,93 @@ def add_pending_delete_fields():
             print(f'添加字段时出错: {e}')
             db.session.rollback()
 
+@app.cli.command('add_version_management_tables')
+def add_version_management_tables():
+    """添加版本管理相关的表和字段"""
+    with app.app_context():
+        try:
+            # 为 devices 表添加版本相关字段
+            try:
+                db.session.execute(text('ALTER TABLE devices ADD COLUMN protocol_version VARCHAR(10) DEFAULT "1.0"'))
+                print('已为 devices 表添加 protocol_version 字段')
+            except Exception as e:
+                print(f'protocol_version 字段可能已存在: {e}')
+            
+            try:
+                db.session.execute(text('ALTER TABLE devices ADD COLUMN hardware_version VARCHAR(10) DEFAULT "1.0"'))
+                print('已为 devices 表添加 hardware_version 字段')
+            except Exception as e:
+                print(f'hardware_version 字段可能已存在: {e}')
+            
+            try:
+                db.session.execute(text('ALTER TABLE devices ADD COLUMN boot_count INTEGER DEFAULT 0'))
+                print('已为 devices 表添加 boot_count 字段')
+            except Exception as e:
+                print(f'boot_count 字段可能已存在: {e}')
+            
+            try:
+                db.session.execute(text('ALTER TABLE devices ADD COLUMN install_time DATETIME DEFAULT CURRENT_TIMESTAMP'))
+                print('已为 devices 表添加 install_time 字段')
+            except Exception as e:
+                print(f'install_time 字段可能已存在: {e}')
+            
+            # 创建固件版本表
+            try:
+                db.session.execute(text('''
+                    CREATE TABLE IF NOT EXISTS firmware_versions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        version_string VARCHAR(32) UNIQUE NOT NULL,
+                        major INTEGER NOT NULL,
+                        minor INTEGER NOT NULL,
+                        patch INTEGER NOT NULL,
+                        build INTEGER DEFAULT 0,
+                        suffix VARCHAR(16) DEFAULT 'stable',
+                        build_date VARCHAR(20),
+                        build_time VARCHAR(20),
+                        git_hash VARCHAR(16),
+                        download_url VARCHAR(256),
+                        file_size INTEGER DEFAULT 0,
+                        checksum VARCHAR(64),
+                        is_stable BOOLEAN DEFAULT 1,
+                        is_force_update BOOLEAN DEFAULT 0,
+                        min_hardware_version VARCHAR(10) DEFAULT '1.0',
+                        min_protocol_version VARCHAR(10) DEFAULT '1.0',
+                        release_notes TEXT,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        is_active BOOLEAN DEFAULT 1
+                    )
+                '''))
+                print('已创建 firmware_versions 表')
+            except Exception as e:
+                print(f'firmware_versions 表可能已存在: {e}')
+            
+            # 创建设备版本历史表
+            try:
+                db.session.execute(text('''
+                    CREATE TABLE IF NOT EXISTS device_version_history (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        device_id VARCHAR(20) NOT NULL,
+                        from_version VARCHAR(32),
+                        to_version VARCHAR(32) NOT NULL,
+                        upgrade_type VARCHAR(20) DEFAULT 'ota',
+                        status VARCHAR(20) DEFAULT 'success',
+                        error_message TEXT,
+                        upgrade_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        operator VARCHAR(50),
+                        FOREIGN KEY (device_id) REFERENCES devices (device_id)
+                    )
+                '''))
+                print('已创建 device_version_history 表')
+            except Exception as e:
+                print(f'device_version_history 表可能已存在: {e}')
+            
+            db.session.commit()
+            print('版本管理相关表和字段添加完成')
+            
+        except Exception as e:
+            print(f'添加版本管理表和字段时出错: {e}')
+            db.session.rollback()
+
 @app.cli.command('create_admin')
 def create_admin():
     """创建管理员账户"""
@@ -1667,6 +1979,378 @@ def ota_update():
             return jsonify({'error': f'WebSocket下发失败: {e}'}), 500
     else:
         return jsonify({'error': '设备未在线，无法下发OTA升级'}), 400
+
+# 版本管理相关函数
+def parse_version_string(version_str):
+    """解析版本字符串，返回(major, minor, patch)元组"""
+    if not version_str:
+        return (0, 0, 0)
+    
+    # 移除可能的'v'前缀
+    if version_str.startswith('v'):
+        version_str = version_str[1:]
+    
+    parts = version_str.split('.')
+    major = int(parts[0]) if len(parts) > 0 and parts[0].isdigit() else 0
+    minor = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+    patch = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+    
+    return (major, minor, patch)
+
+def compare_versions(version1, version2):
+    """比较两个版本，返回1表示version1更新，-1表示version2更新，0表示相等"""
+    v1 = parse_version_string(version1)
+    v2 = parse_version_string(version2)
+    
+    if v1 > v2:
+        return 1
+    elif v1 < v2:
+        return -1
+    else:
+        return 0
+
+def get_latest_firmware_version(device_id=None):
+    """获取最新的固件版本"""
+    try:
+        # 获取最新的稳定版本
+        latest = FirmwareVersion.query.filter_by(
+            is_active=True,
+            is_stable=True
+        ).order_by(
+            FirmwareVersion.major.desc(),
+            FirmwareVersion.minor.desc(),
+            FirmwareVersion.patch.desc(),
+            FirmwareVersion.build.desc()
+        ).first()
+        
+        return latest
+    except Exception as e:
+        print(f"获取最新固件版本失败: {e}")
+        return None
+
+def check_version_compatibility(current_fw, current_proto, current_hw, target_fw):
+    """检查版本兼容性"""
+    try:
+        # 检查硬件版本兼容性
+        current_hw_major, current_hw_minor, _ = parse_version_string(current_hw)
+        target_hw_major, target_hw_minor, _ = parse_version_string(target_fw.min_hardware_version)
+        
+        if current_hw_major < target_hw_major or (current_hw_major == target_hw_major and current_hw_minor < target_hw_minor):
+            return False
+        
+        # 检查协议版本兼容性
+        current_proto_major, current_proto_minor, _ = parse_version_string(current_proto)
+        target_proto_major, target_proto_minor, _ = parse_version_string(target_fw.min_protocol_version)
+        
+        if current_proto_major < target_proto_major or (current_proto_major == target_proto_major and current_proto_minor < target_proto_minor):
+            return False
+        
+        return True
+    except Exception as e:
+        print(f"检查版本兼容性失败: {e}")
+        return False
+
+# 版本管理API
+@app.route('/api/firmware_versions')
+@admin_required
+def api_firmware_versions():
+    """获取固件版本列表"""
+    try:
+        versions = FirmwareVersion.query.filter_by(is_active=True).order_by(
+            FirmwareVersion.major.desc(),
+            FirmwareVersion.minor.desc(),
+            FirmwareVersion.patch.desc()
+        ).all()
+        
+        version_list = []
+        for version in versions:
+            version_info = {
+                'id': version.id,
+                'version_string': version.version_string,
+                'major': version.major,
+                'minor': version.minor,
+                'patch': version.patch,
+                'build': version.build,
+                'suffix': version.suffix,
+                'is_stable': version.is_stable,
+                'is_force_update': version.is_force_update,
+                'download_url': version.download_url,
+                'file_size': version.file_size,
+                'checksum': version.checksum,
+                'release_notes': version.release_notes,
+                'created_at': version.created_at.strftime('%Y-%m-%d %H:%M:%S')
+            }
+            version_list.append(version_info)
+        
+        return jsonify({
+            'total': len(version_list),
+            'versions': version_list
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/firmware_versions', methods=['POST'])
+@admin_required
+def api_add_firmware_version():
+    """添加新的固件版本"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Invalid JSON data'}), 400
+        
+        # 检查版本是否已存在
+        existing = FirmwareVersion.query.filter_by(version_string=data['version_string']).first()
+        if existing:
+            return jsonify({'error': '版本已存在'}), 409
+        
+        # 创建新版本
+        new_version = FirmwareVersion(
+            version_string=data['version_string'],
+            major=data['major'],
+            minor=data['minor'],
+            patch=data['patch'],
+            build=data.get('build', 0),
+            suffix=data.get('suffix', 'stable'),
+            build_date=data.get('build_date'),
+            build_time=data.get('build_time'),
+            git_hash=data.get('git_hash'),
+            download_url=data.get('download_url'),
+            file_size=data.get('file_size', 0),
+            checksum=data.get('checksum'),
+            is_stable=data.get('is_stable', True),
+            is_force_update=data.get('is_force_update', False),
+            min_hardware_version=data.get('min_hardware_version', '1.0'),
+            min_protocol_version=data.get('min_protocol_version', '1.0'),
+            release_notes=data.get('release_notes')
+        )
+        
+        db.session.add(new_version)
+        db.session.commit()
+        
+        return jsonify({
+            'status': 'success',
+            'message': '固件版本添加成功',
+            'version_id': new_version.id
+        }), 201
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/devices/<device_id>/version_history')
+@admin_required
+def api_device_version_history(device_id):
+    """获取设备版本历史"""
+    try:
+        history = DeviceVersionHistory.query.filter_by(device_id=device_id).order_by(
+            DeviceVersionHistory.upgrade_time.desc()
+        ).all()
+        
+        history_list = []
+        for record in history:
+            history_info = {
+                'id': record.id,
+                'from_version': record.from_version,
+                'to_version': record.to_version,
+                'upgrade_type': record.upgrade_type,
+                'status': record.status,
+                'error_message': record.error_message,
+                'upgrade_time': record.upgrade_time.strftime('%Y-%m-%d %H:%M:%S'),
+                'operator': record.operator
+            }
+            history_list.append(history_info)
+        
+        return jsonify({
+            'device_id': device_id,
+            'total': len(history_list),
+            'history': history_list
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/devices/<device_id>/force_update', methods=['POST'])
+@admin_required
+def api_force_device_update(device_id):
+    """强制设备升级到指定版本"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Invalid JSON data'}), 400
+        
+        target_version = data.get('target_version')
+        if not target_version:
+            return jsonify({'error': 'Missing target_version'}), 400
+        
+        # 查找目标版本
+        fw_version = FirmwareVersion.query.filter_by(
+            version_string=target_version,
+            is_active=True
+        ).first()
+        
+        if not fw_version:
+            return jsonify({'error': '目标版本不存在'}), 404
+        
+        # 发送强制升级指令
+        ws = connected_devices.get(device_id)
+        if ws and ws_loop:
+            try:
+                msg = {
+                    "type": "ota_update",
+                    "url": fw_version.download_url,
+                    "version": fw_version.version_string,
+                    "checksum": fw_version.checksum,
+                    "force": True
+                }
+                asyncio.run_coroutine_threadsafe(
+                    ws.send(json.dumps(msg)),
+                    ws_loop
+                )
+                
+                # 记录升级历史
+                history = DeviceVersionHistory(
+                    device_id=device_id,
+                    to_version=target_version,
+                    upgrade_type='manual',
+                    status='in_progress',
+                    operator=session.get('admin_user', 'unknown')
+                )
+                db.session.add(history)
+                db.session.commit()
+                
+                return jsonify({
+                    'status': 'success',
+                    'message': '强制升级指令已下发'
+                }), 200
+            except Exception as e:
+                return jsonify({'error': f'WebSocket下发失败: {e}'}), 500
+        else:
+            return jsonify({'error': '设备未在线'}), 400
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/devices/<device_id>/rollback', methods=['POST'])
+@admin_required
+def api_device_rollback(device_id):
+    """设备版本回滚"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Invalid JSON data'}), 400
+        
+        target_version = data.get('target_version')
+        reason = data.get('reason', '管理员手动回滚')
+        
+        if not target_version:
+            return jsonify({'error': 'Missing target_version'}), 400
+        
+        # 发送回滚指令
+        ws = connected_devices.get(device_id)
+        if ws and ws_loop:
+            try:
+                msg = {
+                    "type": "rollback_request",
+                    "target_version": target_version,
+                    "reason": reason
+                }
+                asyncio.run_coroutine_threadsafe(
+                    ws.send(json.dumps(msg)),
+                    ws_loop
+                )
+                
+                return jsonify({
+                    'status': 'success',
+                    'message': '版本回滚指令已下发'
+                }), 200
+            except Exception as e:
+                return jsonify({'error': f'WebSocket下发失败: {e}'}), 500
+        else:
+            return jsonify({'error': '设备未在线'}), 400
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.cli.command('add_firmware_version')
+def add_firmware_version():
+    """添加固件版本（命令行工具）"""
+    with app.app_context():
+        try:
+            version_string = input('请输入版本号 (如 v1.0.0): ')
+            major = int(input('请输入主版本号: '))
+            minor = int(input('请输入次版本号: '))
+            patch = int(input('请输入补丁版本号: '))
+            build = int(input('请输入构建号 (默认0): ') or '0')
+            suffix = input('请输入版本后缀 (默认stable): ') or 'stable'
+            download_url = input('请输入下载URL: ')
+            file_size = int(input('请输入文件大小 (字节): ') or '0')
+            checksum = input('请输入校验和 (可选): ') or None
+            is_stable = input('是否为稳定版本 (y/n, 默认y): ').lower() != 'n'
+            is_force_update = input('是否强制更新 (y/n, 默认n): ').lower() == 'y'
+            release_notes = input('请输入发布说明 (可选): ') or None
+            
+            # 检查版本是否已存在
+            existing = FirmwareVersion.query.filter_by(version_string=version_string).first()
+            if existing:
+                print(f'版本 {version_string} 已存在')
+                return
+            
+            # 创建新版本
+            new_version = FirmwareVersion(
+                version_string=version_string,
+                major=major,
+                minor=minor,
+                patch=patch,
+                build=build,
+                suffix=suffix,
+                download_url=download_url,
+                file_size=file_size,
+                checksum=checksum,
+                is_stable=is_stable,
+                is_force_update=is_force_update,
+                release_notes=release_notes
+            )
+            
+            db.session.add(new_version)
+            db.session.commit()
+            
+            print(f'固件版本 {version_string} 添加成功')
+            
+        except Exception as e:
+            print(f'添加固件版本失败: {e}')
+            db.session.rollback()
+
+@app.cli.command('list_firmware_versions')
+def list_firmware_versions():
+    """列出所有固件版本"""
+    with app.app_context():
+        try:
+            versions = FirmwareVersion.query.filter_by(is_active=True).order_by(
+                FirmwareVersion.major.desc(),
+                FirmwareVersion.minor.desc(),
+                FirmwareVersion.patch.desc()
+            ).all()
+            
+            if not versions:
+                print('没有找到固件版本')
+                return
+            
+            print('固件版本列表:')
+            print('-' * 80)
+            for version in versions:
+                print(f'版本: {version.version_string}')
+                print(f'  主版本: {version.major}.{version.minor}.{version.patch}')
+                print(f'  构建号: {version.build}')
+                print(f'  后缀: {version.suffix}')
+                print(f'  稳定版本: {"是" if version.is_stable else "否"}')
+                print(f'  强制更新: {"是" if version.is_force_update else "否"}')
+                print(f'  下载URL: {version.download_url}')
+                print(f'  文件大小: {version.file_size} 字节')
+                print(f'  创建时间: {version.created_at}')
+                if version.release_notes:
+                    print(f'  发布说明: {version.release_notes}')
+                print('-' * 80)
+                
+        except Exception as e:
+            print(f'列出固件版本失败: {e}')
 
 if __name__ == "__main__":
     import threading

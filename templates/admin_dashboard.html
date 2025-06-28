@@ -234,9 +234,10 @@
                 <a href="{{ url_for('logout') }}" class="logout-btn"><i class="fa-solid fa-right-from-bracket"></i> 登出</a>
             </div>
             <div class="nav">
-                <a href="{{ url_for('admin_dashboard') }}"><i class="fa-solid fa-gauge"></i> 仪表板</a>
-                <a href="{{ url_for('admin_devices') }}"><i class="fa-solid fa-list"></i> 设备管理</a>
-                <a href="{{ url_for('index') }}"><i class="fa-solid fa-house"></i> 返回首页</a>
+                <a href="/admin" class="nav-link">仪表板</a>
+                <a href="/admin/devices" class="nav-link">设备管理</a>
+                <a href="/admin/versions" class="nav-link">版本管理</a>
+                <a href="/" class="nav-link">返回首页</a>
             </div>
         </div>
         

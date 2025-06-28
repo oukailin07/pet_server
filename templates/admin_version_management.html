@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>版本管理 - 宠物喂食器管理系统</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        .version-card {
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+        .version-stable {
+            border-left: 4px solid #28a745;
+        }
+        .version-beta {
+            border-left: 4px solid #ffc107;
+        }
+        .version-alpha {
+            border-left: 4px solid #dc3545;
+        }
+        .status-badge {
+            font-size: 0.8em;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/admin">宠物喂食器管理系统</a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="/admin">仪表板</a>
+                <a class="nav-link" href="/admin/devices">设备管理</a>
+                <a class="nav-link active" href="/admin/versions">版本管理</a>
+                <a class="nav-link" href="/logout">退出</a>
+                <a class="nav-link" href="/">返回首页</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2><i class="bi bi-code-slash"></i> 版本管理</h2>
+                    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addVersionModal">
+                        <i class="bi bi-plus-circle"></i> 添加版本
+                    </button>
+                </div>
+
+                <!-- 版本列表 -->
+                <div class="row" id="versionList">
+                    <!-- 版本卡片将通过JavaScript动态加载 -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加版本模态框 -->
+    <div class="modal fade" id="addVersionModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">添加新版本</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="addVersionForm">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">版本号 *</label>
+                                    <input type="text" class="form-control" name="version_string" placeholder="v1.0.0" required>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">版本后缀</label>
+                                    <select class="form-select" name="suffix">
+                                        <option value="stable">stable</option>
+                                        <option value="beta">beta</option>
+                                        <option value="alpha">alpha</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-3">
+                                <div class="mb-3">
+                                    <label class="form-label">主版本号 *</label>
+                                    <input type="number" class="form-control" name="major" required>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="mb-3">
+                                    <label class="form-label">次版本号 *</label>
+                                    <input type="number" class="form-control" name="minor" required>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="mb-3">
+                                    <label class="form-label">补丁版本号 *</label>
+                                    <input type="number" class="form-control" name="patch" required>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="mb-3">
+                                    <label class="form-label">构建号</label>
+                                    <input type="number" class="form-control" name="build" value="0">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">下载URL *</label>
+                            <input type="url" class="form-control" name="download_url" required>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">文件大小 (字节)</label>
+                                    <input type="number" class="form-control" name="file_size" value="0">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">校验和</label>
+                                    <input type="text" class="form-control" name="checksum">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">最低硬件版本</label>
+                                    <input type="text" class="form-control" name="min_hardware_version" value="1.0">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">最低协议版本</label>
+                                    <input type="text" class="form-control" name="min_protocol_version" value="1.0">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="is_stable" checked>
+                                <label class="form-check-label">稳定版本</label>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="is_force_update">
+                                <label class="form-check-label">强制更新</label>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">发布说明</label>
+                            <textarea class="form-control" name="release_notes" rows="3" placeholder="版本更新内容..."></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="addVersion()">添加版本</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 加载版本列表
+        function loadVersions() {
+            fetch('/api/firmware_versions')
+                .then(response => response.json())
+                .then(data => {
+                    const versionList = document.getElementById('versionList');
+                    versionList.innerHTML = '';
+                    
+                    if (data.versions.length === 0) {
+                        versionList.innerHTML = '<div class="col-12"><div class="alert alert-info">暂无版本信息</div></div>';
+                        return;
+                    }
+                    
+                    data.versions.forEach(version => {
+                        const versionCard = createVersionCard(version);
+                        versionList.appendChild(versionCard);
+                    });
+                })
+                .catch(error => {
+                    console.error('加载版本列表失败:', error);
+                    document.getElementById('versionList').innerHTML = 
+                        '<div class="col-12"><div class="alert alert-danger">加载版本列表失败</div></div>';
+                });
+        }
+
+        // 创建版本卡片
+        function createVersionCard(version) {
+            const col = document.createElement('div');
+            col.className = 'col-md-6 col-lg-4';
+            
+            const versionClass = version.suffix === 'stable' ? 'version-stable' : 
+                               version.suffix === 'beta' ? 'version-beta' : 'version-alpha';
+            
+            col.innerHTML = `
+                <div class="version-card ${versionClass}">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <h5 class="mb-0">${version.version_string}</h5>
+                        <div>
+                            ${version.is_stable ? '<span class="badge bg-success status-badge">稳定</span>' : 
+                              '<span class="badge bg-warning status-badge">测试</span>'}
+                            ${version.is_force_update ? '<span class="badge bg-danger status-badge">强制</span>' : ''}
+                        </div>
+                    </div>
+                    <p class="text-muted mb-2">
+                        ${version.major}.${version.minor}.${version.patch} (构建 ${version.build})
+                    </p>
+                    <div class="mb-2">
+                        <small class="text-muted">
+                            <i class="bi bi-download"></i> ${formatFileSize(version.file_size)}
+                        </small>
+                    </div>
+                    <div class="mb-2">
+                        <small class="text-muted">
+                            <i class="bi bi-calendar"></i> ${version.created_at}
+                        </small>
+                    </div>
+                    ${version.release_notes ? `<p class="small text-muted">${version.release_notes}</p>` : ''}
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-sm btn-outline-primary" onclick="editVersion(${version.id})">
+                            <i class="bi bi-pencil"></i> 编辑
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="deleteVersion(${version.id})">
+                            <i class="bi bi-trash"></i> 删除
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            return col;
+        }
+
+        // 格式化文件大小
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // 添加版本
+        function addVersion() {
+            const form = document.getElementById('addVersionForm');
+            const formData = new FormData(form);
+            const data = {};
+            
+            formData.forEach((value, key) => {
+                if (key === 'is_stable' || key === 'is_force_update') {
+                    data[key] = value === 'on';
+                } else {
+                    data[key] = value;
+                }
+            });
+            
+            fetch('/api/firmware_versions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data)
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.status === 'success') {
+                    alert('版本添加成功');
+                    bootstrap.Modal.getInstance(document.getElementById('addVersionModal')).hide();
+                    form.reset();
+                    loadVersions();
+                } else {
+                    alert('版本添加失败: ' + result.error);
+                }
+            })
+            .catch(error => {
+                console.error('添加版本失败:', error);
+                alert('添加版本失败');
+            });
+        }
+
+        // 页面加载时获取版本列表
+        document.addEventListener('DOMContentLoaded', function() {
+            loadVersions();
+        });
+    </script>
+</body>
+</html> 
