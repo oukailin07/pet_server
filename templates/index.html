@@ -386,13 +386,29 @@
             background: #2563eb;
             color: #fff;
         }
+        .update-notice-btn {
+            padding: 8px 18px;
+            border-radius: 6px;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .update-notice-btn.latest {
+            background: #e5e7eb !important;
+            color: #2563eb !important;
+            border: 1px solid #a1a1aa !important;
+        }
     </style>
 </head>
 <body>
     <div class="navbar">
         <div class="logo">宠物喂食器</div>
         <div class="nav-right">
-            <a href="/admin/versions" class="logout">版本管理</a>
+            <div class="version-info" onclick="showVersionInfo()" style="cursor: pointer; color: #fff; font-size: 15px; opacity: 0.85; display: flex; align-items: center; gap: 6px;">
+                <span>📱 v{{ device.firmware_version }}</span>
+                <span id="update-badge" style="display: none; background: #ef4444; color: white; border-radius: 50%; width: 8px; height: 8px; font-size: 0;"></span>
+            </div>
             <span class="device-id">📋 {{ device.device_id }}</span>
             <a href="/logout" class="logout">退出</a>
         </div>
@@ -459,6 +475,9 @@
             <button onclick="showManualFeedModal()" id="manualFeedBtn" {% if not device.is_online %}disabled style="opacity:0.5;cursor:not-allowed;"{% endif %}>🤲 手动喂食</button>
             <button id="syncBtn" {% if not device.is_online %}disabled style="opacity:0.5;cursor:not-allowed;"{% endif %}>🔄 数据同步</button>
             <a class="export-btn" href="/export_feeding_records/{{ device.device_id }}">⬇️ 导出数据</a>
+            <button id="updateNoticeBtn" class="update-notice-btn" style="background: #fef3c7; color: #b91c1c; border: 1px solid #f59e0b; margin-left: 8px; display: none;" onclick="showVersionInfo()">
+                🔔 有新版本
+            </button>
         </div>
         <div class="card-section">
             <div class="section-title"><span class="icon">📅</span>喂食计划</div>
@@ -1117,6 +1136,126 @@
             otaMsg.style.color = '#e53935';
         }
     });
+    </script>
+    
+    <!-- 版本信息弹窗 -->
+    <div class="modal" id="versionInfoModal" style="display: none;">
+        <div class="modal-content" style="max-width: 500px;">
+            <h3>📱 版本信息</h3>
+            <div id="versionInfoContent">
+                <div style="margin-bottom: 20px;">
+                    <p><strong>当前版本：</strong> v{{ device.firmware_version }}</p>
+                    <p><strong>硬件版本：</strong> v{{ device.hardware_version }}</p>
+                    <p><strong>协议版本：</strong> v{{ device.protocol_version }}</p>
+                    <p><strong>设备ID：</strong> {{ device.device_id }}</p>
+                </div>
+                <div id="updateInfo" style="display: none;">
+                    <hr style="margin: 20px 0;">
+                    <div id="updateMessage"></div>
+                </div>
+            </div>
+            <div class="modal-actions" id="versionModalActions">
+                <button type="button" onclick="hideVersionInfo()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 版本信息相关功能
+        function showVersionInfo() {
+            const modal = document.getElementById('versionInfoModal');
+            modal.style.display = 'flex';
+            setTimeout(() => { modal.classList.add('show'); }, 10);
+            
+            // 检查是否有新版本
+            fetch('/api/firmware_versions')
+                .then(response => response.json())
+                .then(data => {
+                    const currentVersion = '{{ device.firmware_version }}';
+                    const latestVersion = data.versions && data.versions.length > 0 ? data.versions[0] : null;
+                    const actionsDiv = document.getElementById('versionModalActions');
+                    // 先移除旧的升级按钮
+                    const oldBtn = document.getElementById('otaUpgradeBtn');
+                    if (oldBtn) oldBtn.remove();
+                    if (latestVersion && compareVersions(latestVersion.version_string, currentVersion) > 0) {
+                        // 有新版本，插入升级按钮
+                        const upgradeBtn = document.createElement('button');
+                        upgradeBtn.id = 'otaUpgradeBtn';
+                        upgradeBtn.type = 'button';
+                        upgradeBtn.style = 'background:linear-gradient(90deg,#22d3ee 0%,#6366f1 100%);color:#fff;margin-left:10px;';
+                        upgradeBtn.innerText = '立即升级';
+                        upgradeBtn.onclick = function() {
+                            document.getElementById('ota-url').value = latestVersion.download_url;
+                            document.getElementById('ota-form').dispatchEvent(new Event('submit', {cancelable: true, bubbles: true}));
+                            hideVersionInfo();
+                        };
+                        actionsDiv.appendChild(upgradeBtn);
+                    }
+                });
+        }
+        
+        function hideVersionInfo() {
+            const modal = document.getElementById('versionInfoModal');
+            modal.classList.remove('show');
+            setTimeout(() => { modal.style.display = 'none'; }, 300);
+        }
+        
+        function checkForUpdates() {
+            fetch('/api/firmware_versions')
+                .then(response => response.json())
+                .then(data => {
+                    const currentVersion = '{{ device.firmware_version }}';
+                    const latestVersion = data.versions && data.versions.length > 0 ? data.versions[0] : null;
+                    const updateNoticeBtn = document.getElementById('updateNoticeBtn');
+                    if (latestVersion && compareVersions(latestVersion.version_string, currentVersion) > 0) {
+                        // 有新版本
+                        updateNoticeBtn.style.display = 'inline-block';
+                        updateNoticeBtn.classList.remove('latest');
+                        updateNoticeBtn.innerHTML = '🔔 有新版本';
+                    } else {
+                        updateNoticeBtn.style.display = 'inline-block';
+                        updateNoticeBtn.classList.add('latest');
+                        updateNoticeBtn.innerHTML = '✅ 已是最新';
+                    }
+                })
+                .catch(error => {
+                    console.error('检查更新失败:', error);
+                });
+        }
+        
+        function compareVersions(version1, version2) {
+            // 简单的版本比较函数
+            const v1 = version1.replace('v', '').split('.').map(Number);
+            const v2 = version2.replace('v', '').split('.').map(Number);
+            
+            for (let i = 0; i < Math.max(v1.length, v2.length); i++) {
+                const num1 = v1[i] || 0;
+                const num2 = v2[i] || 0;
+                if (num1 > num2) return 1;
+                if (num1 < num2) return -1;
+            }
+            return 0;
+        }
+        
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+        
+        // 页面加载时检查更新
+        document.addEventListener('DOMContentLoaded', function() {
+            checkForUpdates();
+        });
+        
+        // 版本信息弹窗点击外部关闭
+        document.getElementById('versionInfoModal').onclick = function(e) {
+            if(e.target === this) {
+                hideVersionInfo();
+            }
+        };
     </script>
 </body>
 </html>

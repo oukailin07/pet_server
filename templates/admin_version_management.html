@@ -34,7 +34,9 @@
             <div class="navbar-nav ms-auto">
                 <a class="nav-link" href="/admin">仪表板</a>
                 <a class="nav-link" href="/admin/devices">设备管理</a>
+                {% if is_admin %}
                 <a class="nav-link active" href="/admin/versions">版本管理</a>
+                {% endif %}
                 <a class="nav-link" href="/logout">退出</a>
                 <a class="nav-link" href="/">返回首页</a>
             </div>
@@ -42,13 +44,20 @@
     </nav>
 
     <div class="container mt-4">
+        <!-- 调试信息 -->
+        <div style="background: #f0f0f0; padding: 10px; margin-bottom: 20px; border-radius: 5px;">
+            <strong>调试信息：</strong> is_admin = {{ is_admin }}, session.admin_user = {{ session.get('admin_user', 'None') }}
+        </div>
+        
         <div class="row">
             <div class="col-12">
                 <div class="d-flex justify-content-between align-items-center mb-4">
                     <h2><i class="bi bi-code-slash"></i> 版本管理</h2>
+                    {% if is_admin %}
                     <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addVersionModal">
                         <i class="bi bi-plus-circle"></i> 添加版本
                     </button>
+                    {% endif %}
                 </div>
 
                 <!-- 版本列表 -->
@@ -59,6 +68,7 @@
         </div>
     </div>
 
+    {% if is_admin %}
     <!-- 添加版本模态框 -->
     <div class="modal fade" id="addVersionModal" tabindex="-1">
         <div class="modal-dialog modal-lg">
@@ -73,7 +83,7 @@
                             <div class="col-md-6">
                                 <div class="mb-3">
                                     <label class="form-label">版本号 *</label>
-                                    <input type="text" class="form-control" name="version_string" placeholder="v1.0.0" required>
+                                    <input type="text" class="form-control" name="version_string" placeholder="1.0.1" required>
                                 </div>
                             </div>
                             <div class="col-md-6">
@@ -106,30 +116,10 @@
                                     <input type="number" class="form-control" name="patch" required>
                                 </div>
                             </div>
-                            <div class="col-md-3">
-                                <div class="mb-3">
-                                    <label class="form-label">构建号</label>
-                                    <input type="number" class="form-control" name="build" value="0">
-                                </div>
-                            </div>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">下载URL *</label>
                             <input type="url" class="form-control" name="download_url" required>
-                        </div>
-                        <div class="row">
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label class="form-label">文件大小 (字节)</label>
-                                    <input type="number" class="form-control" name="file_size" value="0">
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label class="form-label">校验和</label>
-                                    <input type="text" class="form-control" name="checksum">
-                                </div>
-                            </div>
                         </div>
                         <div class="row">
                             <div class="col-md-6">
@@ -170,6 +160,100 @@
             </div>
         </div>
     </div>
+
+    <!-- 编辑版本模态框 -->
+    <div class="modal fade" id="editVersionModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">编辑版本</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="editVersionForm">
+                        <input type="hidden" name="id" id="edit_version_id">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">版本号 *</label>
+                                    <input type="text" class="form-control" name="version_string" id="edit_version_string" placeholder="1.0.1" required>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">版本后缀</label>
+                                    <select class="form-select" name="suffix" id="edit_suffix">
+                                        <option value="stable">stable</option>
+                                        <option value="beta">beta</option>
+                                        <option value="alpha">alpha</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-3">
+                                <div class="mb-3">
+                                    <label class="form-label">主版本号 *</label>
+                                    <input type="number" class="form-control" name="major" id="edit_major" required>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="mb-3">
+                                    <label class="form-label">次版本号 *</label>
+                                    <input type="number" class="form-control" name="minor" id="edit_minor" required>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="mb-3">
+                                    <label class="form-label">补丁版本号 *</label>
+                                    <input type="number" class="form-control" name="patch" id="edit_patch" required>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">下载URL *</label>
+                            <input type="url" class="form-control" name="download_url" id="edit_download_url" required>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">最低硬件版本</label>
+                                    <input type="text" class="form-control" name="min_hardware_version" id="edit_min_hardware_version" value="1.0">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">最低协议版本</label>
+                                    <input type="text" class="form-control" name="min_protocol_version" id="edit_min_protocol_version" value="1.0">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="is_stable" id="edit_is_stable">
+                                <label class="form-check-label">稳定版本</label>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="is_force_update" id="edit_is_force_update">
+                                <label class="form-check-label">强制更新</label>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">发布说明</label>
+                            <textarea class="form-control" name="release_notes" id="edit_release_notes" rows="3" placeholder="版本更新内容..."></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="updateVersion()">保存修改</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
@@ -217,13 +301,8 @@
                         </div>
                     </div>
                     <p class="text-muted mb-2">
-                        ${version.major}.${version.minor}.${version.patch} (构建 ${version.build})
+                        ${version.major}.${version.minor}.${version.patch}
                     </p>
-                    <div class="mb-2">
-                        <small class="text-muted">
-                            <i class="bi bi-download"></i> ${formatFileSize(version.file_size)}
-                        </small>
-                    </div>
                     <div class="mb-2">
                         <small class="text-muted">
                             <i class="bi bi-calendar"></i> ${version.created_at}
@@ -242,15 +321,6 @@
             `;
             
             return col;
-        }
-
-        // 格式化文件大小
-        function formatFileSize(bytes) {
-            if (bytes === 0) return '0 B';
-            const k = 1024;
-            const sizes = ['B', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
 
         // 添加版本
@@ -288,6 +358,98 @@
             .catch(error => {
                 console.error('添加版本失败:', error);
                 alert('添加版本失败');
+            });
+        }
+
+        // 编辑版本
+        function editVersion(versionId) {
+            // 获取版本详情
+            fetch(`/api/firmware_versions/${versionId}`)
+                .then(response => response.json())
+                .then(version => {
+                    // 填充表单
+                    document.getElementById('edit_version_id').value = version.id;
+                    document.getElementById('edit_version_string').value = version.version_string;
+                    document.getElementById('edit_suffix').value = version.suffix;
+                    document.getElementById('edit_major').value = version.major;
+                    document.getElementById('edit_minor').value = version.minor;
+                    document.getElementById('edit_patch').value = version.patch;
+                    document.getElementById('edit_download_url').value = version.download_url;
+                    document.getElementById('edit_min_hardware_version').value = version.min_hardware_version;
+                    document.getElementById('edit_min_protocol_version').value = version.min_protocol_version;
+                    document.getElementById('edit_is_stable').checked = version.is_stable;
+                    document.getElementById('edit_is_force_update').checked = version.is_force_update;
+                    document.getElementById('edit_release_notes').value = version.release_notes || '';
+                    
+                    // 显示模态框
+                    new bootstrap.Modal(document.getElementById('editVersionModal')).show();
+                })
+                .catch(error => {
+                    console.error('获取版本详情失败:', error);
+                    alert('获取版本详情失败');
+                });
+        }
+
+        // 更新版本
+        function updateVersion() {
+            const form = document.getElementById('editVersionForm');
+            const formData = new FormData(form);
+            const data = {};
+            
+            formData.forEach((value, key) => {
+                if (key === 'is_stable' || key === 'is_force_update') {
+                    data[key] = value === 'on';
+                } else {
+                    data[key] = value;
+                }
+            });
+            
+            const versionId = data.id;
+            
+            fetch(`/api/firmware_versions/${versionId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data)
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.status === 'success') {
+                    alert('版本更新成功');
+                    bootstrap.Modal.getInstance(document.getElementById('editVersionModal')).hide();
+                    loadVersions();
+                } else {
+                    alert('版本更新失败: ' + result.error);
+                }
+            })
+            .catch(error => {
+                console.error('更新版本失败:', error);
+                alert('更新版本失败');
+            });
+        }
+
+        // 删除版本
+        function deleteVersion(versionId) {
+            if (!confirm('确定要删除这个版本吗？此操作不可恢复。')) {
+                return;
+            }
+            
+            fetch(`/api/firmware_versions/${versionId}`, {
+                method: 'DELETE'
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.status === 'success') {
+                    alert('版本删除成功');
+                    loadVersions();
+                } else {
+                    alert('版本删除失败: ' + result.error);
+                }
+            })
+            .catch(error => {
+                console.error('删除版本失败:', error);
+                alert('删除版本失败');
             });
         }
 

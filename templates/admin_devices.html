@@ -271,8 +271,10 @@
             </div>
             <div class="nav">
                 <a href="{{ url_for('admin_dashboard') }}"><i class="fa-solid fa-gauge"></i> 仪表板</a>
-                <a href="{{ url_for('admin_devices') }}"><i class="fa-solid fa-list"></i> 设备管理</a>
+                <a href="{{ url_for('admin_devices') }}"><i class="fa-solid fa-microchip"></i> 设备管理</a>
+                {% if is_admin %}
                 <a href="{{ url_for('admin_versions') }}"><i class="fa-solid fa-code-fork"></i> 版本管理</a>
+                {% endif %}
                 <a href="{{ url_for('index') }}"><i class="fa-solid fa-house"></i> 返回首页</a>
             </div>
         </div>

@@ -540,100 +540,75 @@ def list_devices():
 @app.route('/admin')
 @admin_required
 def admin_dashboard():
-    """管理员仪表板"""
-    # 获取所有设备
     devices = Device.query.all()
-    
-    # 统计信息
     total_devices = len(devices)
     online_devices = len([d for d in devices if d.is_online])
     offline_devices = total_devices - online_devices
-    
-    # 获取最近的喂食记录
     recent_records = FeedingRecord.query.order_by(FeedingRecord.created_at.desc()).limit(20).all()
-    
-    # 获取最近的手动喂食
     recent_manuals = ManualFeeding.query.order_by(ManualFeeding.created_at.desc()).limit(20).all()
-    
-    # 转换为北京时间
     beijing = pytz.timezone('Asia/Shanghai')
     for device in devices:
         device.last_seen_local = device.last_seen.replace(tzinfo=pytz.utc).astimezone(beijing) if device.last_seen else None
         device.last_grain_update_local = device.last_grain_update.replace(tzinfo=pytz.utc).astimezone(beijing) if device.last_grain_update else None
-    
     for record in recent_records:
         record.created_at_local = record.created_at.replace(tzinfo=pytz.utc).astimezone(beijing)
-    
     for manual in recent_manuals:
         if manual.executed_at:
             manual.executed_at_local = manual.executed_at.replace(tzinfo=pytz.utc).astimezone(beijing)
-    
+    is_admin = 'admin_user' in session
     return render_template('admin_dashboard.html',
                          devices=devices,
                          total_devices=total_devices,
                          online_devices=online_devices,
                          offline_devices=offline_devices,
                          recent_records=recent_records,
-                         recent_manuals=recent_manuals)
+                         recent_manuals=recent_manuals,
+                         is_admin=is_admin)
 
 @app.route('/admin/devices')
 @admin_required
 def admin_devices():
-    """管理员设备管理页面"""
     devices = Device.query.all()
     beijing = pytz.timezone('Asia/Shanghai')
-    
     for device in devices:
         device.last_seen_local = device.last_seen.replace(tzinfo=pytz.utc).astimezone(beijing) if device.last_seen else None
         device.last_grain_update_local = device.last_grain_update.replace(tzinfo=pytz.utc).astimezone(beijing) if device.last_grain_update else None
-        # 检查设备是否在线
         device.is_online_now = (datetime.utcnow() - device.last_seen).total_seconds() < 300 if device.last_seen else False
-    
-    return render_template('admin_devices.html', devices=devices)
+    is_admin = 'admin_user' in session
+    return render_template('admin_devices.html', devices=devices, is_admin=is_admin)
 
 @app.route('/admin/device/<device_id>')
 @admin_required
 def admin_device_detail(device_id):
-    """管理员查看单个设备详情"""
     device = Device.query.filter_by(device_id=device_id).first()
     if not device:
         flash('设备不存在', 'error')
         return redirect(url_for('admin_devices'))
-    
-    # 获取设备的喂食计划
     feeding_plans = FeedingPlan.query.filter_by(device_id=device_id, is_active=True, is_pending_delete=False).all()
-    
-    # 获取设备的手动喂食记录
     manual_feedings = ManualFeeding.query.filter_by(device_id=device_id, is_pending_delete=False).order_by(ManualFeeding.created_at.desc()).limit(50).all()
-    
-    # 获取设备的喂食记录
     feeding_records = FeedingRecord.query.filter_by(device_id=device_id).order_by(FeedingRecord.created_at.desc()).limit(50).all()
-    
-    # 转换为北京时间
     beijing = pytz.timezone('Asia/Shanghai')
     device.last_seen_local = device.last_seen.replace(tzinfo=pytz.utc).astimezone(beijing) if device.last_seen else None
     device.last_grain_update_local = device.last_grain_update.replace(tzinfo=pytz.utc).astimezone(beijing) if device.last_grain_update else None
-    
     for record in feeding_records:
         record.created_at_local = record.created_at.replace(tzinfo=pytz.utc).astimezone(beijing)
-    
     for manual in manual_feedings:
         if manual.executed_at:
             manual.executed_at_local = manual.executed_at.replace(tzinfo=pytz.utc).astimezone(beijing)
-    
+    is_admin = 'admin_user' in session
     return render_template('admin_device_detail.html',
                          device=device,
                          feeding_plans=feeding_plans,
                          manual_feedings=manual_feedings,
-                         feeding_records=feeding_records)
+                         feeding_records=feeding_records,
+                         is_admin=is_admin)
 
 @app.route('/admin/versions')
+@admin_required
 def admin_versions():
-    """版本管理页面，登录用户和管理员都可访问"""
-    if 'device_id' not in session and 'admin_user' not in session:
-        flash('请先登录', 'error')
-        return redirect(url_for('login'))
-    return render_template('admin_version_management.html')
+    """版本管理页面，仅管理员可访问"""
+    is_admin = 'admin_user' in session
+    return render_template('admin_version_management.html', is_admin=is_admin)
 
 @app.route('/api/devices')
 def api_devices():
@@ -1542,11 +1517,20 @@ async def ws_handler(websocket):
                                     latest_version
                                 )
                                 
+                                # 确保版本号格式统一（去掉v前缀）
+                                version_string = latest_version.version_string
+                                if version_string.startswith('v'):
+                                    version_string = version_string[1:]
+                                
+                                # 比较版本号，只有当设备版本低于最新版本时才需要更新
+                                version_compare = compare_versions(firmware_version, version_string)
+                                has_update = version_compare < 0  # 设备版本低于最新版本
+                                
                                 response = {
                                     "type": "version_check_result",
                                     "device_id": device_id,
-                                    "has_update": True,
-                                    "latest_version": latest_version.version_string,
+                                    "has_update": has_update,
+                                    "latest_version": version_string,
                                     "download_url": latest_version.download_url,
                                     "force_update": latest_version.is_force_update,
                                     "file_size": latest_version.file_size,
@@ -1957,14 +1941,28 @@ def list_admins():
 
 @app.route('/ota_update', methods=['POST'])
 def ota_update():
-    """设备OTA升级接口，普通用户可用"""
-    if 'device_id' not in session:
+    """设备OTA升级接口，普通用户和管理员都可用"""
+    # 检查登录状态
+    if 'device_id' not in session and 'admin_user' not in session:
         return jsonify({'error': '未登录，无法操作'}), 401
-    device_id = session['device_id']
+    
     data = request.get_json()
     url = data.get('url') if data else None
     if not url or not url.startswith('http'):
         return jsonify({'error': '请提供合法的固件URL'}), 400
+    
+    # 确定设备ID
+    if 'device_id' in session:
+        # 普通用户登录，使用session中的device_id
+        device_id = session['device_id']
+    elif 'admin_user' in session:
+        # 管理员登录，需要从请求中获取device_id
+        device_id = data.get('device_id')
+        if not device_id:
+            return jsonify({'error': '管理员操作需要指定device_id参数'}), 400
+    else:
+        return jsonify({'error': '无法确定设备ID'}), 400
+    
     ws = connected_devices.get(device_id)
     if ws and ws_loop:
         try:
@@ -1986,7 +1984,7 @@ def parse_version_string(version_str):
     if not version_str:
         return (0, 0, 0)
     
-    # 移除可能的'v'前缀
+    # 去掉v前缀
     if version_str.startswith('v'):
         version_str = version_str[1:]
     
@@ -2052,16 +2050,16 @@ def check_version_compatibility(current_fw, current_proto, current_hw, target_fw
 
 # 版本管理API
 @app.route('/api/firmware_versions')
-@admin_required
 def api_firmware_versions():
-    """获取固件版本列表"""
+    # 只要登录即可
+    if 'device_id' not in session and 'admin_user' not in session:
+        return jsonify({'error': '未登录'}), 401
     try:
         versions = FirmwareVersion.query.filter_by(is_active=True).order_by(
             FirmwareVersion.major.desc(),
             FirmwareVersion.minor.desc(),
             FirmwareVersion.patch.desc()
         ).all()
-        
         version_list = []
         for version in versions:
             version_info = {
@@ -2081,12 +2079,9 @@ def api_firmware_versions():
                 'created_at': version.created_at.strftime('%Y-%m-%d %H:%M:%S')
             }
             version_list.append(version_info)
-        
-        return jsonify({
-            'total': len(version_list),
-            'versions': version_list
-        })
+        return jsonify({'total': len(version_list), 'versions': version_list})
     except Exception as e:
+        print(f"获取固件版本列表失败: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/firmware_versions', methods=['POST'])
@@ -2097,12 +2092,10 @@ def api_add_firmware_version():
         data = request.get_json()
         if not data:
             return jsonify({'error': 'Invalid JSON data'}), 400
-        
         # 检查版本是否已存在
         existing = FirmwareVersion.query.filter_by(version_string=data['version_string']).first()
         if existing:
             return jsonify({'error': '版本已存在'}), 409
-        
         # 创建新版本
         new_version = FirmwareVersion(
             version_string=data['version_string'],
@@ -2123,16 +2116,121 @@ def api_add_firmware_version():
             min_protocol_version=data.get('min_protocol_version', '1.0'),
             release_notes=data.get('release_notes')
         )
-        
         db.session.add(new_version)
         db.session.commit()
-        
         return jsonify({
             'status': 'success',
             'message': '固件版本添加成功',
             'version_id': new_version.id
         }), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/firmware_versions/<int:version_id>')
+@admin_required
+def api_get_firmware_version(version_id):
+    """获取单个固件版本详情"""
+    try:
+        version = FirmwareVersion.query.get(version_id)
+        if not version:
+            return jsonify({'error': '版本不存在'}), 404
         
+        version_info = {
+            'id': version.id,
+            'version_string': version.version_string,
+            'major': version.major,
+            'minor': version.minor,
+            'patch': version.patch,
+            'build': version.build,
+            'suffix': version.suffix,
+            'is_stable': version.is_stable,
+            'is_force_update': version.is_force_update,
+            'download_url': version.download_url,
+            'file_size': version.file_size,
+            'checksum': version.checksum,
+            'min_hardware_version': version.min_hardware_version,
+            'min_protocol_version': version.min_protocol_version,
+            'release_notes': version.release_notes,
+            'created_at': version.created_at.strftime('%Y-%m-%d %H:%M:%S')
+        }
+        return jsonify(version_info)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/firmware_versions/<int:version_id>', methods=['PUT'])
+@admin_required
+def api_update_firmware_version(version_id):
+    """更新固件版本"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Invalid JSON data'}), 400
+        
+        version = FirmwareVersion.query.get(version_id)
+        if not version:
+            return jsonify({'error': '版本不存在'}), 404
+        
+        # 检查版本号是否与其他版本冲突
+        if 'version_string' in data and data['version_string'] != version.version_string:
+            existing = FirmwareVersion.query.filter_by(version_string=data['version_string']).first()
+            if existing:
+                return jsonify({'error': '版本号已存在'}), 409
+        
+        # 更新字段
+        if 'version_string' in data:
+            version.version_string = data['version_string']
+        if 'major' in data:
+            version.major = data['major']
+        if 'minor' in data:
+            version.minor = data['minor']
+        if 'patch' in data:
+            version.patch = data['patch']
+        if 'build' in data:
+            version.build = data['build']
+        if 'suffix' in data:
+            version.suffix = data['suffix']
+        if 'download_url' in data:
+            version.download_url = data['download_url']
+        if 'file_size' in data:
+            version.file_size = data['file_size']
+        if 'checksum' in data:
+            version.checksum = data['checksum']
+        if 'is_stable' in data:
+            version.is_stable = data['is_stable']
+        if 'is_force_update' in data:
+            version.is_force_update = data['is_force_update']
+        if 'min_hardware_version' in data:
+            version.min_hardware_version = data['min_hardware_version']
+        if 'min_protocol_version' in data:
+            version.min_protocol_version = data['min_protocol_version']
+        if 'release_notes' in data:
+            version.release_notes = data['release_notes']
+        
+        db.session.commit()
+        return jsonify({
+            'status': 'success',
+            'message': '固件版本更新成功'
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/firmware_versions/<int:version_id>', methods=['DELETE'])
+@admin_required
+def api_delete_firmware_version(version_id):
+    """删除固件版本"""
+    try:
+        version = FirmwareVersion.query.get(version_id)
+        if not version:
+            return jsonify({'error': '版本不存在'}), 404
+        
+        # 软删除：标记为不活跃
+        version.is_active = False
+        db.session.commit()
+        
+        return jsonify({
+            'status': 'success',
+            'message': '固件版本删除成功'
+        }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -2363,4 +2461,4 @@ if __name__ == "__main__":
     # 创建数据库表
     create_tables()
     # 启动Flask
-    app.run(host="0.0.0.0", port=80) 
+    app.run(host="0.0.0.0", port=80)

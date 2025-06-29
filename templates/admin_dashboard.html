@@ -225,6 +225,11 @@
 </head>
 <body>
     <div class="container">
+        <!-- 调试信息 -->
+        <div style="background: #f0f0f0; padding: 10px; margin-bottom: 20px; border-radius: 5px;">
+            <strong>调试信息：</strong> is_admin = {{ is_admin }}, session.admin_user = {{ session.get('admin_user', 'None') }}
+        </div>
+        
         <div class="header">
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div>
@@ -236,7 +241,9 @@
             <div class="nav">
                 <a href="/admin" class="nav-link">仪表板</a>
                 <a href="/admin/devices" class="nav-link">设备管理</a>
+                {% if is_admin %}
                 <a href="/admin/versions" class="nav-link">版本管理</a>
+                {% endif %}
                 <a href="/" class="nav-link">返回首页</a>
             </div>
         </div>
